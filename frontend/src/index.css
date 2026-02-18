@@ -1,0 +1,10 @@
+/* Legacy styles - keeping for Polaris compatibility during migration */
+/* Tailwind is imported via globals.css */
+
+/* Reset some base styles that may conflict with Polaris */
+.polaris-wrapper {
+  /* Polaris styles will apply within this wrapper */
+}
+
+/* Custom app-specific styles can go here */
+/* These will be phased out as we migrate to Tailwind/shadcn */

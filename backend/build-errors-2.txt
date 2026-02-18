@@ -1,0 +1,60 @@
+          Type 'TargetAudience' is not assignable to type 'InputJsonObject'.
+            Index signature for type 'string' is missing in type 'TargetAudience'.
+
+[7m78[0m       data,
+[7m  [0m [91m      ~~~~[0m
+
+  [96mnode_modules/.prisma/client/index.d.ts[0m:[93m12869[0m:[93m5[0m
+    [7m12869[0m     data: XOR<BusinessProfileUpdateInput, BusinessProfileUncheckedUpdateInput>
+    [7m     [0m [96m    ~~~~[0m
+    The expected type comes from property 'data' which is declared here on type '{ select?: BusinessProfileSelect<DefaultArgs>; include?: BusinessProfileInclude<DefaultArgs>; data: (Without<...> & BusinessProfileUncheckedUpdateInput) | (Without<...> & BusinessProfileUpdateInput); where: BusinessProfileWhereUniqueInput; }'
+[96msrc/services/__tests__/qa-content-integration.test.ts[0m:[93m15[0m:[93m3[0m - [91merror[0m[90m TS2724: [0m'"../index"' has no exported member named 'createPerplexityService'. Did you mean 'PerplexityService'?
+
+[7m15[0m   createPerplexityService,
+[7m  [0m [91m  ~~~~~~~~~~~~~~~~~~~~~~~[0m
+[96msrc/services/content-calendar-service.ts[0m:[93m57[0m:[93m40[0m - [91merror[0m[90m TS2339: [0mProperty 'id' does not exist on type 'GeneratedContent'.
+
+[7m57[0m         content_generation_id: content.id || null,
+[7m  [0m [91m                                       ~~[0m
+[96msrc/services/gdpr-service.ts[0m:[93m63[0m:[93m7[0m - [91merror[0m[90m TS2353: [0mObject literal may only specify known properties, and 'email' does not exist in type 'UserDataExport'.
+
+[7m63[0m       email: user.email,
+[7m  [0m [91m      ~~~~~[0m
+[96msrc/services/gdpr-service.ts[0m:[93m223[0m:[93m9[0m - [91merror[0m[90m TS2322: [0mType '{ userId: string; action: SecurityEventType; resourceType: string; resourceId: string; changes: string; ipAddress: string; userAgent: string; }' is not assignable to type '(Without<AuditLogCreateInput, AuditLogUncheckedCreateInput> & AuditLogUncheckedCreateInput) | (Without<...> & AuditLogCreateInput)'.
+  Type '{ userId: string; action: SecurityEventType; resourceType: string; resourceId: string; changes: string; ipAddress: string; userAgent: string; }' is not assignable to type 'Without<AuditLogUncheckedCreateInput, AuditLogCreateInput> & AuditLogCreateInput'.
+    Type '{ userId: string; action: SecurityEventType; resourceType: string; resourceId: string; changes: string; ipAddress: string; userAgent: string; }' is not assignable to type 'Without<AuditLogUncheckedCreateInput, AuditLogCreateInput>'.
+      Types of property 'userId' are incompatible.
+        Type 'string' is not assignable to type 'never'.
+
+[7m223[0m         data: {
+[7m   [0m [91m        ~~~~[0m
+
+  [96mnode_modules/.prisma/client/index.d.ts[0m:[93m9641[0m:[93m5[0m
+    [7m9641[0m     data: XOR<AuditLogCreateInput, AuditLogUncheckedCreateInput>
+    [7m    [0m [96m    ~~~~[0m
+    The expected type comes from property 'data' which is declared here on type '{ select?: AuditLogSelect<DefaultArgs>; include?: AuditLogInclude<DefaultArgs>; data: (Without<AuditLogCreateInput, AuditLogUncheckedCreateInput> & AuditLogUncheckedCreateInput) | (Without<...> & AuditLogCreateInput); }'
+[96msrc/services/rbac-service.ts[0m:[93m240[0m:[93m15[0m - [91merror[0m[90m TS2322: [0mType 'UserRole' is not assignable to type 'UserRole | EnumUserRoleFieldUpdateOperationsInput'.
+
+[7m240[0m       data: { role },
+[7m   [0m [91m              ~~~~[0m
+
+  [96mnode_modules/.prisma/client/index.d.ts[0m:[93m23610[0m:[93m5[0m
+    [7m23610[0m     role?: EnumUserRoleFieldUpdateOperationsInput | $Enums.UserRole
+    [7m     [0m [96m    ~~~~[0m
+    The expected type comes from property 'role' which is declared here on type '(Without<UserUpdateInput, UserUncheckedUpdateInput> & UserUncheckedUpdateInput) | (Without<...> & UserUpdateInput)'
+[96msrc/workflows/auto-optimization-workflow.ts[0m:[93m315[0m:[93m23[0m - [91merror[0m[90m TS2362: [0mThe left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+
+[7m315[0m       positionChange: (previous?.avgPosition || 0) - (latest?.avgPosition || 0),
+[7m   [0m [91m                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[96msrc/workflows/auto-optimization-workflow.ts[0m:[93m315[0m:[93m54[0m - [91merror[0m[90m TS2363: [0mThe right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+
+[7m315[0m       positionChange: (previous?.avgPosition || 0) - (latest?.avgPosition || 0),
+[7m   [0m [91m                                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[96msrc/workflows/auto-optimization-workflow.ts[0m:[93m335[0m:[93m58[0m - [91merror[0m[90m TS2345: [0mArgument of type '0 | Decimal' is not assignable to parameter of type 'number'.
+  Type 'Decimal' is not assignable to type 'number'.
+
+[7m335[0m         changePercentage: this.calculatePercentageChange(previous?.ctr || 0, latest?.ctr || 0),
+[7m   [0m [91m                                                         ~~~~~~~~~~~~~~~~~~[0m
+
+Found 13 error(s).
+

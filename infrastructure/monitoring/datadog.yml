@@ -1,0 +1,254 @@
+# =====================================
+# DataDog Configuration
+# =====================================
+# This file configures DataDog APM, monitoring, and logging
+# for the Shopify SEO Platform
+# =====================================
+
+# API Configuration
+api_key: ${DD_API_KEY}
+site: datadoghq.com
+
+# Service Information
+service: shopify-seo-platform
+env: ${DD_ENV}
+version: ${DD_VERSION}
+
+# APM Configuration
+apm_config:
+  enabled: true
+  env: ${DD_ENV}
+
+  # Trace sampling
+  analyzed_rate_by_service:
+    shopify-seo-backend: 1.0
+    shopify-seo-frontend: 0.5
+
+  # Maximum trace size
+  max_traces_per_second: 200
+
+  # Additional configuration
+  profiling_enabled: true
+  runtime_metrics_enabled: true
+
+# Log Collection
+logs_enabled: true
+logs_config:
+  container_collect_all: true
+  processing_rules:
+    - type: exclude_at_match
+      name: exclude_health_checks
+      pattern: "GET /health"
+
+    - type: mask_sequences
+      name: mask_credit_cards
+      pattern: '\d{4}-\d{4}-\d{4}-\d{4}'
+      replace_placeholder: "[REDACTED-CC]"
+
+    - type: mask_sequences
+      name: mask_api_keys
+      pattern: 'sk-[a-zA-Z0-9]+'
+      replace_placeholder: "[REDACTED-API-KEY]"
+
+# Process Monitoring
+process_config:
+  enabled: true
+
+# System Metrics
+system_probe_config:
+  enabled: true
+
+# Custom Metrics
+dogstatsd_config:
+  enabled: true
+  port: 8125
+  non_local_traffic: true
+
+# Tags
+tags:
+  - project:shopify-seo-platform
+  - team:engineering
+  - environment:${DD_ENV}
+  - service:${DD_SERVICE}
+
+# Integrations
+integrations:
+  # PostgreSQL
+  postgres:
+    - host: ${RDS_ENDPOINT}
+      port: 5432
+      username: datadog
+      password: ${DD_POSTGRES_PASSWORD}
+      dbname: shopify_seo
+      tags:
+        - db:postgresql
+        - env:${DD_ENV}
+      collect_function_metrics: true
+      collect_count_metrics: true
+      collect_activity_metrics: true
+      collect_database_size_metrics: true
+
+  # Redis
+  redis:
+    - host: ${REDIS_ENDPOINT}
+      port: 6379
+      password: ${REDIS_PASSWORD}
+      tags:
+        - cache:redis
+        - env:${DD_ENV}
+
+  # ECS Fargate
+  ecs_fargate:
+    tags:
+      - cluster:shopify-seo-cluster-${DD_ENV}
+      - service:${DD_SERVICE}
+
+# Monitors (Alerts)
+monitors:
+  # API Error Rate
+  - name: "High API Error Rate"
+    type: metric
+    query: "avg(last_5m):sum:trace.http.request.errors{service:shopify-seo-backend,env:${DD_ENV}} / sum:trace.http.request.hits{service:shopify-seo-backend,env:${DD_ENV}} > 0.05"
+    message: |
+      API error rate is above 5% for the last 5 minutes.
+      Current value: {{value}}%
+
+      @slack-engineering @pagerduty-critical
+    tags:
+      - priority:P2
+      - service:backend
+    thresholds:
+      critical: 0.05
+      warning: 0.03
+
+  # API Latency
+  - name: "High API Latency"
+    type: metric
+    query: "avg(last_10m):p95:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}} > 0.5"
+    message: |
+      API P95 latency is above 500ms.
+      Current value: {{value}}s
+
+      @slack-engineering @pagerduty-warning
+    tags:
+      - priority:P3
+      - service:backend
+    thresholds:
+      critical: 0.5
+      warning: 0.3
+
+  # Database Connection Pool
+  - name: "Database Connection Pool Exhausted"
+    type: metric
+    query: "avg(last_5m):avg:postgresql.connections{db:shopify_seo,env:${DD_ENV}} > 150"
+    message: |
+      Database connection pool is approaching limit.
+      Current connections: {{value}}
+
+      @slack-engineering
+    tags:
+      - priority:P3
+      - component:database
+    thresholds:
+      critical: 150
+      warning: 120
+
+  # Redis Memory
+  - name: "Redis Memory Usage High"
+    type: metric
+    query: "avg(last_5m):avg:redis.mem.used{env:${DD_ENV}} / avg:redis.mem.maxmemory{env:${DD_ENV}} > 0.85"
+    message: |
+      Redis memory usage is above 85%.
+      Current usage: {{value}}%
+
+      @slack-engineering
+    tags:
+      - priority:P3
+      - component:cache
+    thresholds:
+      critical: 0.85
+      warning: 0.75
+
+  # ECS Task Count
+  - name: "No Running ECS Tasks"
+    type: metric
+    query: "avg(last_5m):avg:ecs.fargate.task.count{cluster:shopify-seo-cluster-${DD_ENV},service:shopify-seo-backend-${DD_ENV}} < 1"
+    message: |
+      No running backend ECS tasks detected!
+      This is a critical outage.
+
+      @slack-engineering @pagerduty-critical
+    tags:
+      - priority:P1
+      - component:ecs
+    thresholds:
+      critical: 1
+
+# Dashboards
+dashboards:
+  - name: "Shopify SEO Platform - Overview"
+    widgets:
+      - type: timeseries
+        title: "API Request Rate"
+        queries:
+          - query: "sum:trace.http.request.hits{service:shopify-seo-backend,env:${DD_ENV}}.as_rate()"
+
+      - type: timeseries
+        title: "API Error Rate"
+        queries:
+          - query: "sum:trace.http.request.errors{service:shopify-seo-backend,env:${DD_ENV}}.as_rate()"
+
+      - type: timeseries
+        title: "API Latency (P50, P95, P99)"
+        queries:
+          - query: "p50:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}}"
+          - query: "p95:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}}"
+          - query: "p99:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}}"
+
+      - type: query_value
+        title: "Active Users"
+        queries:
+          - query: "count_not_null:custom.active_users{env:${DD_ENV}}"
+
+      - type: timeseries
+        title: "Database Connections"
+        queries:
+          - query: "avg:postgresql.connections{db:shopify_seo,env:${DD_ENV}}"
+
+      - type: timeseries
+        title: "Redis Hit Rate"
+        queries:
+          - query: "avg:redis.stats.keyspace_hits{env:${DD_ENV}} / (avg:redis.stats.keyspace_hits{env:${DD_ENV}} + avg:redis.stats.keyspace_misses{env:${DD_ENV}})"
+
+      - type: timeseries
+        title: "ECS Task Count"
+        queries:
+          - query: "avg:ecs.fargate.task.count{cluster:shopify-seo-cluster-${DD_ENV}}"
+
+      - type: log_stream
+        title: "Recent Errors"
+        query: "service:shopify-seo-backend status:error env:${DD_ENV}"
+
+# SLO (Service Level Objectives)
+slos:
+  - name: "API Availability"
+    type: metric
+    description: "99.9% of API requests should succeed"
+    thresholds:
+      - timeframe: 7d
+        target: 99.9
+        warning: 99.95
+    query:
+      numerator: "sum:trace.http.request.hits{service:shopify-seo-backend,env:${DD_ENV}} - sum:trace.http.request.errors{service:shopify-seo-backend,env:${DD_ENV}}"
+      denominator: "sum:trace.http.request.hits{service:shopify-seo-backend,env:${DD_ENV}}"
+
+  - name: "API Latency"
+    type: metric
+    description: "95% of API requests should complete within 500ms"
+    thresholds:
+      - timeframe: 7d
+        target: 95.0
+        warning: 97.0
+    query:
+      numerator: "count:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}} by {resource_name}.rollup(count).fill(zero) where duration <= 0.5"
+      denominator: "count:trace.http.request.duration{service:shopify-seo-backend,env:${DD_ENV}} by {resource_name}.rollup(count).fill(zero)"

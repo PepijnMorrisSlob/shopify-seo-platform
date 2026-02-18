@@ -1,0 +1,66 @@
+# =====================================
+# Terraform Variables Configuration
+# Copy this file to terraform.tfvars and fill in your values
+# =====================================
+
+# General Configuration
+project_name = "shopify-seo"
+environment  = "dev"  # dev, staging, or production
+aws_region   = "us-east-1"
+
+# Database Configuration
+db_name     = "shopify_seo"
+db_username = "postgres"
+db_password = "CHANGE_ME_MIN_16_CHARS"  # Must be at least 16 characters
+
+# Redis Configuration
+redis_node_type  = "cache.r6g.large"  # Use cache.t4g.micro for dev
+redis_auth_token = "CHANGE_ME_MIN_16_CHARS"  # Must be at least 16 characters
+
+# ECS Configuration
+backend_cpu             = 2048  # 2 vCPU
+backend_memory          = 4096  # 4 GB
+frontend_cpu            = 512   # 0.5 vCPU
+frontend_memory         = 1024  # 1 GB
+backend_desired_count   = 2
+frontend_desired_count  = 2
+backend_autoscaling_min = 2
+backend_autoscaling_max = 10
+frontend_autoscaling_min = 2
+frontend_autoscaling_max = 6
+
+# Application Configuration
+backend_image_tag  = "latest"
+frontend_image_tag = "latest"
+
+# Shopify Configuration
+shopify_api_key    = "your_shopify_api_key"
+shopify_api_secret = "your_shopify_api_secret"
+
+# Security Configuration
+jwt_secret     = "GENERATE_RANDOM_64_CHAR_STRING_HERE"  # Must be exactly 64 characters
+encryption_key = "GENERATE_RANDOM_32_CHAR_STRING"       # Must be exactly 32 characters
+
+# External Services (Optional)
+openai_api_key    = ""  # Leave empty if not using
+anthropic_api_key = ""  # Leave empty if not using
+datadog_api_key   = ""  # Leave empty if not using
+sentry_dsn        = ""  # Leave empty if not using
+
+# SSL Certificate (Production Only)
+acm_certificate_arn = ""  # ARN of your ACM certificate
+domain_name         = ""  # Your domain name (e.g., app.example.com)
+
+# Monitoring
+alert_email       = "alerts@example.com"
+enable_monitoring = true
+
+# Backups
+backup_retention_days = 7
+
+# Additional Tags
+tags = {
+  Team    = "Engineering"
+  Owner   = "DevOps"
+  Project = "Shopify SEO Platform"
+}

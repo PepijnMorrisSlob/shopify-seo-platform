@@ -1,0 +1,96 @@
+# Multi-stage build for production optimization
+# Stage 1: Base image with Node.js 20
+FROM node:20-alpine AS base
+
+# Install build dependencies
+RUN apk add --no-cache \
+    libc6-compat \
+    python3 \
+    make \
+    g++ \
+    curl
+
+WORKDIR /app
+
+# Copy package files
+COPY backend/package*.json ./
+
+# Stage 2: Development
+FROM base AS development
+
+# Install all dependencies (including devDependencies)
+RUN npm ci
+
+# Copy source code
+COPY backend/ ./
+
+# Expose ports
+EXPOSE 3000 9229
+
+# Start development server with hot reload
+# Generate Prisma client and run migrations on startup
+CMD sh -c "npx prisma generate && npx prisma migrate deploy && npm run start:dev"
+
+# Stage 3: Build
+FROM base AS build
+
+# Install all dependencies
+RUN npm ci
+
+# Copy source code
+COPY backend/ ./
+
+# Build the application (Prisma will be generated during build command)
+RUN npm run build
+
+# Remove development dependencies
+RUN npm prune --production
+
+# Stage 4: Production
+FROM node:20-alpine AS production
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001
+
+WORKDIR /app
+
+# Copy package files
+COPY backend/package*.json ./
+
+# Copy production dependencies from build stage
+COPY --from=build --chown=nestjs:nodejs /app/node_modules ./node_modules
+
+# Copy built application
+COPY --from=build --chown=nestjs:nodejs /app/dist ./dist
+
+# Copy Prisma schema and generated client
+COPY --from=build --chown=nestjs:nodejs /app/prisma ./prisma
+COPY --from=build --chown=nestjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+
+# Copy environment files (if needed)
+COPY --chown=nestjs:nodejs backend/.env.example ./.env.example
+
+# Set environment variables
+ENV NODE_ENV=production \
+    PORT=3000 \
+    NODE_OPTIONS="--max-old-space-size=2048"
+
+# Switch to non-root user
+USER nestjs
+
+# Expose application port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Use dumb-init to handle signals properly
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start the application (run migrations first)
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]

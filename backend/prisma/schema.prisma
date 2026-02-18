@@ -1,0 +1,805 @@
+// Shopify SEO Automation Platform - Database Schema
+// Database/Backend Specialist Agent
+// Production-ready schema with multi-tenant isolation
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "fullTextIndex"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// CORE ENTITY: Organizations (Shopify Stores)
+// ============================================================================
+model Organization {
+  id                   String @id @default(uuid())
+  shopifyDomain        String @unique @map("shopify_domain")
+  shopifyShopId        String @unique @map("shopify_shop_id")
+  accessTokenEncrypted String @map("access_token_encrypted") // AES-256 encrypted
+  shopifyScopes        String @map("shopify_scopes") // Comma-separated list
+
+  // Billing & Plan
+  planTier       PlanTier      @default(FREE) @map("plan_tier")
+  billingStatus  BillingStatus @default(TRIAL) @map("billing_status")
+  trialEndsAt    DateTime?     @map("trial_ends_at")
+  subscriptionId String?       @map("subscription_id") // Shopify recurring charge ID
+  mrr            Decimal       @default(0) @db.Decimal(10, 2) // Monthly recurring revenue
+
+  // Shopify Store Info
+  storeName       String? @map("store_name")
+  storeOwnerEmail String? @map("store_owner_email")
+  country         String? // ISO country code
+  currency        String? // ISO currency code
+  timezone        String? // IANA timezone
+
+  // App Installation
+  installedAt   DateTime  @default(now()) @map("installed_at")
+  uninstalledAt DateTime? @map("uninstalled_at")
+  isActive      Boolean   @default(true) @map("is_active")
+
+  // Usage Tracking
+  monthlyApiCalls    Int       @default(0) @map("monthly_api_calls")
+  monthlyContentGens Int       @default(0) @map("monthly_content_gens")
+  lastSyncAt         DateTime? @map("last_sync_at")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users              User[]
+  products           Product[]
+  contentGenerations ContentGeneration[]
+  keywords           Keyword[]
+  auditLogs          AuditLog[]
+  webhookEvents      WebhookEvent[]
+  analyticsSnapshots AnalyticsSnapshot[]
+  businessProfile    BusinessProfile?
+  qaPages            QAPage[]
+  competitors        Competitor[]
+  contentItems       ContentItem[]
+
+  @@index([shopifyDomain])
+  @@index([planTier, billingStatus])
+  @@index([isActive])
+  @@map("organizations")
+}
+
+enum PlanTier {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum BillingStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  CHURNED
+}
+
+// ============================================================================
+// CORE ENTITY: Users (Organization Members)
+// ============================================================================
+model User {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // User Info
+  email     String
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
+
+  // Authentication
+  passwordHash String?  @map("password_hash") // For non-Shopify users
+  role         UserRole @default(MEMBER)
+  permissions  String[] // Array of permission strings
+
+  // Session Management
+  lastLoginAt    DateTime? @map("last_login_at")
+  lastActivityAt DateTime? @map("last_activity_at")
+  isActive       Boolean   @default(true) @map("is_active")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  auditLogs    AuditLog[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@index([organizationId, isActive])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ============================================================================
+// CORE ENTITY: Products (Shopify Products)
+// ============================================================================
+model Product {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Shopify Product Info
+  shopifyProductId String        @map("shopify_product_id")
+  shopifyVariantId String?       @map("shopify_variant_id") // For variant-specific SEO
+  handle           String
+  title            String
+  bodyHtml         String?       @map("body_html") @db.Text
+  productType      String?       @map("product_type")
+  vendor           String?
+  tags             String[] // Array of tags
+  status           ProductStatus @default(DRAFT)
+
+  // Current SEO Fields (What's live on Shopify)
+  currentMetaTitle       String? @map("current_meta_title")
+  currentMetaDescription String? @map("current_meta_description") @db.Text
+  currentImageUrl        String? @map("current_image_url")
+  currentImageAlt        String? @map("current_image_alt")
+
+  // AI-Generated SEO Fields (Pending approval)
+  generatedMetaTitle       String? @map("generated_meta_title")
+  generatedMetaDescription String? @map("generated_meta_description") @db.Text
+  generatedImageAlt        String? @map("generated_image_alt")
+
+  // Target Keywords
+  targetKeywords String[] @map("target_keywords") // Array of keywords
+  primaryKeyword String?  @map("primary_keyword")
+
+  // SEO Metrics
+  seoScore              Int?    @map("seo_score") // 0-100
+  metaTitleLength       Int?    @map("meta_title_length")
+  metaDescriptionLength Int?    @map("meta_description_length")
+  hasOptimizedImages    Boolean @default(false) @map("has_optimized_images")
+
+  // Performance Metrics
+  impressions Int?     @default(0)
+  clicks      Int?     @default(0)
+  ctr         Decimal? @db.Decimal(5, 2) // Click-through rate
+  avgPosition Decimal? @map("avg_position") @db.Decimal(5, 2)
+
+  // Publishing
+  publishedAt     DateTime? @map("published_at")
+  lastOptimizedAt DateTime? @map("last_optimized_at")
+  needsReview     Boolean   @default(false) @map("needs_review")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contentGenerations ContentGeneration[]
+  keywords           Keyword[]
+
+  @@unique([organizationId, shopifyProductId])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, seoScore])
+  @@index([shopifyProductId])
+  @@index([handle])
+  @@index([organizationId, needsReview])
+  @@map("products")
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+// ============================================================================
+// CORE ENTITY: Content Generations (AI-Generated Content)
+// ============================================================================
+model ContentGeneration {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  productId      String? @map("product_id") // Null for bulk operations
+
+  // Generation Details
+  targetType   ContentTargetType @map("target_type")
+  aiModel      String            @map("ai_model") // "gpt-3.5-turbo", "claude-3-sonnet", etc.
+  prompt       String            @db.Text
+  systemPrompt String?           @map("system_prompt") @db.Text
+
+  // Generated Content
+  generatedContent String @map("generated_content") @db.Text
+  variants         Json? // Array of alternative versions
+
+  // Quality Metrics
+  qualityScore     Int?     @map("quality_score") // 0-100
+  keywordDensity   Decimal? @map("keyword_density") @db.Decimal(5, 2)
+  readabilityScore Int?     @map("readability_score") // Flesch reading ease
+  sentimentScore   Decimal? @map("sentiment_score") @db.Decimal(3, 2)
+
+  // User Feedback
+  status          ContentStatus @default(PENDING)
+  approvedBy      String?       @map("approved_by") // User ID
+  approvedAt      DateTime?     @map("approved_at")
+  rejectionReason String?       @map("rejection_reason")
+
+  // Publishing
+  publishedAt        DateTime? @map("published_at")
+  publishedToShopify Boolean   @default(false) @map("published_to_shopify")
+
+  // Performance Tracking
+  tokensUsed       Int?     @map("tokens_used")
+  generationTimeMs Int?     @map("generation_time_ms")
+  cost             Decimal? @db.Decimal(10, 4) // Cost in USD
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, targetType])
+  @@index([productId])
+  @@index([organizationId, createdAt])
+  @@map("content_generations")
+}
+
+enum ContentTargetType {
+  META_TITLE
+  META_DESCRIPTION
+  IMAGE_ALT_TEXT
+  PRODUCT_DESCRIPTION
+  COLLECTION_DESCRIPTION
+}
+
+enum ContentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+// ============================================================================
+// CORE ENTITY: Keywords (SEO Keywords)
+// ============================================================================
+model Keyword {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  productId      String? @map("product_id") // Null for general keywords
+
+  // Keyword Info
+  keyword      String
+  searchVolume Int?     @map("search_volume")
+  difficulty   Int? // 0-100 (KD from Ahrefs/SEMrush)
+  cpc          Decimal? @db.Decimal(10, 2) // Cost per click in USD
+  competition  Decimal? @db.Decimal(3, 2) // 0-1
+
+  // Performance Metrics
+  currentPosition  Int?     @map("current_position") // Google ranking
+  previousPosition Int?     @map("previous_position") // For tracking changes
+  impressions      Int?     @default(0)
+  clicks           Int?     @default(0)
+  ctr              Decimal? @db.Decimal(5, 2)
+
+  // Data Sources
+  dataSource    String?   @map("data_source") // "google_search_console", "dataforseo", "semrush", etc.
+  lastFetchedAt DateTime? @map("last_fetched_at")
+
+  // Targeting
+  isTargeted Boolean   @default(false) @map("is_targeted")
+  targetedAt DateTime? @map("targeted_at")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, keyword, productId])
+  @@index([organizationId])
+  @@index([organizationId, isTargeted])
+  @@index([keyword])
+  @@index([productId])
+  @@index([organizationId, currentPosition])
+  @@map("keywords")
+}
+
+// ============================================================================
+// CORE ENTITY: Audit Logs (GDPR Compliance)
+// ============================================================================
+model AuditLog {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  userId         String? @map("user_id") // Null for system actions
+
+  // Action Details
+  action       String // "CREATE", "UPDATE", "DELETE", "LOGIN", "EXPORT", etc.
+  resourceType String  @map("resource_type") // "Product", "User", "Organization", etc.
+  resourceId   String? @map("resource_id")
+
+  // Change Tracking
+  changes  Json? // Before/after values
+  metadata Json? // Additional context
+
+  // Request Info
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+  requestId String? @map("request_id")
+
+  // Timestamp
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([organizationId, userId])
+  @@index([organizationId, action])
+  @@index([organizationId, resourceType, resourceId])
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// CORE ENTITY: Webhook Events (Shopify Webhooks)
+// ============================================================================
+model WebhookEvent {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Webhook Info
+  topic          String // "products/create", "products/update", "app/uninstalled", etc.
+  shopifyEventId String? @map("shopify_event_id") // X-Shopify-Event-Id header
+
+  // Payload
+  payload   Json    @db.JsonB
+  hmacValid Boolean @map("hmac_valid")
+
+  // Processing
+  status       WebhookStatus @default(PENDING)
+  processedAt  DateTime?     @map("processed_at")
+  errorMessage String?       @map("error_message") @db.Text
+  retryCount   Int           @default(0) @map("retry_count")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, shopifyEventId])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, topic])
+  @@index([status, retryCount])
+  @@index([createdAt])
+  @@map("webhook_events")
+}
+
+enum WebhookStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================================================
+// CORE ENTITY: Analytics Snapshots (Daily/Weekly Performance)
+// ============================================================================
+model AnalyticsSnapshot {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Time Period
+  snapshotDate DateTime     @map("snapshot_date") @db.Date
+  snapshotType SnapshotType @map("snapshot_type")
+
+  // Metrics
+  totalProducts     Int     @map("total_products")
+  optimizedProducts Int     @map("optimized_products")
+  avgSeoScore       Decimal @map("avg_seo_score") @db.Decimal(5, 2)
+  totalImpressions  Int     @map("total_impressions")
+  totalClicks       Int     @map("total_clicks")
+  avgCtr            Decimal @map("avg_ctr") @db.Decimal(5, 2)
+  avgPosition       Decimal @map("avg_position") @db.Decimal(5, 2)
+
+  // AI Usage
+  contentGenerations Int     @map("content_generations")
+  aiCost             Decimal @map("ai_cost") @db.Decimal(10, 2)
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, snapshotDate, snapshotType])
+  @@index([organizationId])
+  @@index([organizationId, snapshotDate])
+  @@map("analytics_snapshots")
+}
+
+enum SnapshotType {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Business Profiles
+// ============================================================================
+model BusinessProfile {
+  id             String @id @default(uuid())
+  organizationId String @unique @map("organization_id")
+
+  // Basic Info
+  businessName String @map("business_name")
+  industry     String // 'ecommerce', 'saas', 'services', 'health', 'fashion', 'food'
+  productTypes Json   @map("product_types") @db.JsonB // ['physical', 'digital', 'services']
+
+  // Target Audience
+  targetAudience Json @map("target_audience") @db.JsonB // {demographics, expertiseLevel, painPoints, searchBehavior}
+
+  // Brand Voice
+  brandVoice Json @map("brand_voice") @db.JsonB // {tone, personality, avoidWords, preferredWords, exampleContent}
+
+  // Content Strategy
+  contentStrategy Json @map("content_strategy") @db.JsonB // {primaryGoal, contentTypes, postLength, publishingFrequency}
+
+  // SEO Strategy
+  seoStrategy Json @map("seo_strategy") @db.JsonB // {targetKeywords, avoidKeywords, targetLocations, languagePreference}
+
+  // Product Integration
+  productStrategy Json @map("product_strategy") @db.JsonB // {productMentionFrequency, ctaStyle, preferredCTAs}
+
+  // Advanced Settings
+  advancedSettings Json @map("advanced_settings") @db.JsonB // {factCheckingLevel, externalLinkingPolicy, imageStyle, schemaPreferences}
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization            Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customQuestionTemplates CustomQuestionTemplate[]
+  automationRules         AutomationRule[]
+
+  @@index([organizationId])
+  @@index([industry])
+  @@map("business_profiles")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Custom Question Templates
+// ============================================================================
+model CustomQuestionTemplate {
+  id                String @id @default(uuid())
+  organizationId    String @map("organization_id")
+  businessProfileId String @map("business_profile_id")
+
+  // Template Details
+  template  String  @db.Text
+  category  String?
+  priority  Int     @default(0)
+  variables Json?   @db.JsonB // {product_category, use_case, etc.}
+
+  // Usage Tracking
+  usageCount Int @default(0) @map("usage_count")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  businessProfile BusinessProfile @relation(fields: [businessProfileId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([businessProfileId])
+  @@index([organizationId, priority])
+  @@index([category])
+  @@map("custom_question_templates")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Q&A Pages
+// ============================================================================
+model QAPage {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Content
+  question         String  @db.Text
+  answerContent    String? @map("answer_content") @db.Text // Full HTML content
+  answerMarkdown   String? @map("answer_markdown") @db.Text // Markdown version for editing
+  featuredImageUrl String? @map("featured_image_url")
+
+  // Shopify Integration
+  shopifyBlogId     String? @map("shopify_blog_id")
+  shopifyBlogPostId String? @map("shopify_blog_post_id")
+  shopifyPageId     String? @map("shopify_page_id")
+  shopifyUrl        String? @map("shopify_url")
+
+  // SEO
+  targetKeyword   String? @map("target_keyword")
+  metaTitle       String?
+  metaDescription String? @db.Text
+  h1              String?
+  schemaMarkup    Json?   @map("schema_markup") @db.JsonB // FAQ schema, Article schema
+
+  // Performance Tracking
+  currentPosition    Int?     @map("current_position")
+  bestPosition       Int?     @map("best_position")
+  monthlyImpressions Int      @default(0) @map("monthly_impressions")
+  monthlyClicks      Int      @default(0) @map("monthly_clicks")
+  monthlyTraffic     Int      @default(0) @map("monthly_traffic")
+  ctr                Decimal? @db.Decimal(5, 2)
+  seoScore           Int?     @map("seo_score")
+
+  // Status
+  status          String    @default("draft") // draft, pending_review, published, archived
+  publishedAt     DateTime? @map("published_at")
+  lastOptimizedAt DateTime? @map("last_optimized_at")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  internalLinksSource InternalLink[]       @relation("SourcePage")
+  contentPerformance  ContentPerformance[]
+  abTests             ABTest[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([targetKeyword])
+  @@index([organizationId, monthlyTraffic])
+  @@index([shopifyBlogPostId])
+  @@map("qa_pages")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Internal Links
+// ============================================================================
+model InternalLink {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Source (where the link is)
+  sourcePageType String  @map("source_page_type") // 'qa_page', 'product', 'collection'
+  sourcePageId   String? @map("source_page_id")
+  sourceUrl      String  @map("source_url")
+
+  // Target (where the link points to)
+  targetPageType String  @map("target_page_type") // 'qa_page', 'product', 'collection'
+  targetPageId   String? @map("target_page_id")
+  targetUrl      String  @map("target_url")
+
+  // Link Details
+  anchorText String  @map("anchor_text")
+  context    String? @db.Text // Surrounding text for context
+  linkType   String  @map("link_type") // 'contextual', 'cta', 'navigation'
+
+  // AI-generated metadata
+  relevanceScore Decimal? @map("relevance_score") @db.Decimal(3, 2) // 0.00 to 1.00
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  qaPageSource QAPage? @relation("SourcePage", fields: [sourcePageId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, sourceUrl, targetUrl, anchorText])
+  @@index([organizationId])
+  @@index([sourceUrl])
+  @@index([targetUrl])
+  @@index([sourcePageId])
+  @@map("internal_links")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Content Performance
+// ============================================================================
+model ContentPerformance {
+  id     String   @id @default(uuid())
+  pageId String   @map("page_id")
+  date   DateTime @db.Date
+
+  // Google Search Console Metrics
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  ctr         Decimal? @db.Decimal(5, 2)
+  avgPosition Decimal? @map("avg_position") @db.Decimal(5, 2)
+
+  // Analytics Metrics
+  pageviews      Int      @default(0)
+  uniqueVisitors Int      @default(0) @map("unique_visitors")
+  avgTimeOnPage  Int?     @map("avg_time_on_page") // seconds
+  bounceRate     Decimal? @map("bounce_rate") @db.Decimal(5, 2)
+
+  // Conversion Tracking
+  conversions Int      @default(0)
+  revenue     Decimal? @db.Decimal(10, 2)
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  qaPage QAPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, date])
+  @@index([pageId, date])
+  @@index([date])
+  @@map("content_performance")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: A/B Tests
+// ============================================================================
+model ABTest {
+  id             String  @id @default(uuid())
+  organizationId String  @map("organization_id")
+  pageId         String? @map("page_id")
+
+  // Test Configuration
+  elementType String @map("element_type") // 'title', 'meta_description', 'h2s', 'cta', 'intro'
+
+  // Variations (control + 2 variants)
+  controlValue  String  @map("control_value") @db.Text
+  variantAValue String? @map("variant_a_value") @db.Text
+  variantBValue String? @map("variant_b_value") @db.Text
+
+  // Traffic Split
+  trafficSplit Json @map("traffic_split") @db.JsonB // {control: 33, variant_a: 33, variant_b: 34}
+
+  // Results
+  results    Json?    @db.JsonB // {control: {impressions, clicks, ctr}, variant_a: {...}, variant_b: {...}}
+  winner     String? // 'control', 'variant_a', 'variant_b'
+  confidence Decimal? @db.Decimal(5, 2) // Statistical confidence (0.95 = 95%)
+
+  // Status
+  status String @default("running") // running, completed, winner_applied, cancelled
+
+  // Timestamps
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  qaPage QAPage? @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([pageId])
+  @@index([status])
+  @@map("ab_tests")
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Automation Rules
+// ============================================================================
+model AutomationRule {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Rule Configuration
+  ruleType      String  @map("rule_type") // 'content_refresh', 'auto_publish', 'internal_linking', 'ab_testing'
+  configuration Json    @db.JsonB
+  enabled       Boolean @default(true)
+
+  // Execution Tracking
+  lastExecutedAt DateTime? @map("last_executed_at")
+  executionCount Int       @default(0) @map("execution_count")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  businessProfile BusinessProfile? @relation(fields: [organizationId], references: [organizationId], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, ruleType])
+  @@index([enabled])
+  @@map("automation_rules")
+}
+
+// ============================================================================
+// CONTENT CALENDAR: Content Items
+// ============================================================================
+model ContentItem {
+  id             String @id @default(cuid())
+  organizationId String @map("organization_id")
+
+  // Content Details
+  title   String
+  content String @db.Text
+
+  // Content Type & Status
+  contentType ContentItemType   @map("content_type")
+  status      ContentItemStatus @default(DRAFT)
+
+  // Scheduling
+  scheduledAt DateTime? @map("scheduled_at")
+  publishedAt DateTime? @map("published_at")
+
+  // Shopify Integration
+  shopifyId     String? @map("shopify_id")
+  shopifyHandle String? @map("shopify_handle")
+
+  // SEO Fields
+  seoTitle       String? @map("seo_title")
+  seoDescription String? @map("seo_description") @db.Text
+
+  // Metadata
+  tags   String[]
+  author String?
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, scheduledAt])
+  @@index([organizationId, status])
+  @@map("content_items")
+}
+
+enum ContentItemType {
+  BLOG_POST
+  CUSTOM_PAGE
+}
+
+enum ContentItemStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+}
+
+// ============================================================================
+// Q&A CONTENT ENGINE: Competitor Tracking
+// ============================================================================
+model Competitor {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Competitor Info
+  competitorUrl  String  @map("competitor_url")
+  competitorName String? @map("competitor_name")
+
+  // Analysis
+  contentTopics       Json? @map("content_topics") @db.JsonB // Topics they cover
+  keywordsTheyRankFor Json? @map("keywords_they_rank_for") @db.JsonB // Keywords we could target
+  contentGaps         Json? @map("content_gaps") @db.JsonB // Questions they answer that we don't
+
+  // Tracking
+  lastAnalyzedAt DateTime? @map("last_analyzed_at")
+
+  // Metadata
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, competitorUrl])
+  @@index([organizationId])
+  @@map("competitors")
+}

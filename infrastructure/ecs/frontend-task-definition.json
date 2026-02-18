@@ -1,0 +1,68 @@
+{
+  "family": "shopify-seo-frontend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/shopify-seo-ecs-task-execution-ENV",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/shopify-seo-ecs-task-ENV",
+  "containerDefinitions": [
+    {
+      "name": "frontend",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/shopify-seo-frontend-ENV:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/shopify-seo-frontend-ENV",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "linuxParameters": {
+        "initProcessEnabled": true
+      },
+      "readonlyRootFilesystem": true,
+      "mountPoints": [
+        {
+          "sourceVolume": "nginx-cache",
+          "containerPath": "/var/cache/nginx"
+        },
+        {
+          "sourceVolume": "nginx-run",
+          "containerPath": "/var/run"
+        }
+      ]
+    }
+  ],
+  "volumes": [
+    {
+      "name": "nginx-cache"
+    },
+    {
+      "name": "nginx-run"
+    }
+  ]
+}

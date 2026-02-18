@@ -1,0 +1,387 @@
+/**
+ * Q&A Content Integration Tests
+ *
+ * Tests the full workflow for Q&A content generation and publishing:
+ * 1. Discover questions (DataForSEO PAA)
+ * 2. Research question (Perplexity)
+ * 3. Generate content (AI Content Service)
+ * 4. Publish to Shopify Blog/Pages
+ * 5. Add schema markup via metafields
+ */
+
+import { describe, test, expect, beforeAll } from '@jest/globals';
+import {
+  createDataForSEOClient,
+  PerplexityService,
+  createShopifyBlogService,
+  createShopifyPagesService,
+} from '../index';
+
+// Mock environment variables
+const MOCK_ENV = {
+  DATAFORSEO_LOGIN: process.env.DATAFORSEO_LOGIN || 'test@example.com',
+  DATAFORSEO_PASSWORD: process.env.DATAFORSEO_PASSWORD || 'test_password',
+  PERPLEXITY_API_KEY: process.env.PERPLEXITY_API_KEY || 'test_key',
+  SHOPIFY_SHOP_DOMAIN: process.env.SHOPIFY_SHOP_DOMAIN || 'test-shop.myshopify.com',
+  SHOPIFY_ACCESS_TOKEN: process.env.SHOPIFY_ACCESS_TOKEN || 'test_token',
+};
+
+describe('Q&A Content Integration Workflow', () => {
+  let dataForSEO: ReturnType<typeof createDataForSEOClient>;
+  let perplexity: PerplexityService;
+  let shopifyBlog: ReturnType<typeof createShopifyBlogService>;
+  let shopifyPages: ReturnType<typeof createShopifyPagesService>;
+
+  beforeAll(() => {
+    dataForSEO = createDataForSEOClient({
+      login: MOCK_ENV.DATAFORSEO_LOGIN,
+      password: MOCK_ENV.DATAFORSEO_PASSWORD,
+    });
+
+    perplexity = new PerplexityService({
+      apiKey: MOCK_ENV.PERPLEXITY_API_KEY,
+    });
+
+    shopifyBlog = createShopifyBlogService({
+      shopDomain: MOCK_ENV.SHOPIFY_SHOP_DOMAIN,
+      accessToken: MOCK_ENV.SHOPIFY_ACCESS_TOKEN,
+    });
+
+    shopifyPages = createShopifyPagesService({
+      shopDomain: MOCK_ENV.SHOPIFY_SHOP_DOMAIN,
+      accessToken: MOCK_ENV.SHOPIFY_ACCESS_TOKEN,
+    });
+  });
+
+  describe('Step 1: Question Discovery (DataForSEO PAA)', () => {
+    test('should discover People Also Ask questions', async () => {
+      // Skip if no credentials
+      if (!process.env.DATAFORSEO_LOGIN) {
+        console.log('Skipping - no DataForSEO credentials');
+        return;
+      }
+
+      const keyword = 'coffee brewing methods';
+      const paaQuestions = await dataForSEO.getPeopleAlsoAsk(keyword);
+
+      expect(Array.isArray(paaQuestions)).toBe(true);
+      console.log(`Found ${paaQuestions.length} PAA questions for "${keyword}"`);
+
+      if (paaQuestions.length > 0) {
+        console.log('Sample questions:');
+        paaQuestions.slice(0, 5).forEach((q, i) => {
+          console.log(`${i + 1}. ${q.question}`);
+        });
+      }
+    });
+
+    test('should get related searches', async () => {
+      if (!process.env.DATAFORSEO_LOGIN) {
+        console.log('Skipping - no DataForSEO credentials');
+        return;
+      }
+
+      const keyword = 'coffee brewing methods';
+      const relatedSearches = await dataForSEO.getRelatedSearches(keyword);
+
+      expect(Array.isArray(relatedSearches)).toBe(true);
+      console.log(`Found ${relatedSearches.length} related searches`);
+    });
+
+    test('should analyze competitor content', async () => {
+      if (!process.env.DATAFORSEO_LOGIN) {
+        console.log('Skipping - no DataForSEO credentials');
+        return;
+      }
+
+      const domain = 'bluebottlecoffee.com';
+      const competitorContent = await dataForSEO.getCompetitorContent(domain);
+
+      expect(competitorContent.domain).toBe(domain);
+      expect(Array.isArray(competitorContent.topPages)).toBe(true);
+      expect(Array.isArray(competitorContent.topKeywords)).toBe(true);
+
+      console.log(`Competitor Analysis for ${domain}:`);
+      console.log(`- Total Keywords: ${competitorContent.totalKeywords}`);
+      console.log(`- Total Traffic: ${competitorContent.totalTraffic}`);
+      console.log(`- Content Types: ${competitorContent.contentTypes.join(', ')}`);
+    });
+  });
+
+  describe('Step 2: Research Question (Perplexity)', () => {
+    test('should research a question with citations', async () => {
+      if (!process.env.PERPLEXITY_API_KEY) {
+        console.log('Skipping - no Perplexity API key');
+        return;
+      }
+
+      const question = 'What is the best method for brewing coffee at home?';
+      const result = await perplexity.research(question, {
+        depth: 'thorough',
+        returnRelatedQuestions: true,
+      });
+
+      expect(result.answer).toBeTruthy();
+      expect(Array.isArray(result.citations)).toBe(true);
+      expect(Array.isArray(result.sources)).toBe(true);
+
+      console.log(`Research Results for: "${question}"`);
+      console.log(`Answer length: ${result.answer.length} characters`);
+      console.log(`Citations: ${result.citations.length}`);
+      console.log(`Related questions: ${result.relatedQuestions?.length || 0}`);
+
+      if (result.sources.length > 0) {
+        console.log('Sources:');
+        result.sources.slice(0, 3).forEach((source, i) => {
+          console.log(`${i + 1}. ${source}`);
+        });
+      }
+    });
+
+    test('should verify claims', async () => {
+      if (!process.env.PERPLEXITY_API_KEY) {
+        console.log('Skipping - no Perplexity API key');
+        return;
+      }
+
+      const claims = [
+        'French press coffee contains more caffeine than drip coffee',
+        'Cold brew coffee is less acidic than hot coffee',
+      ];
+
+      const verifications = await perplexity.verifyClaims(claims);
+
+      expect(verifications.length).toBe(claims.length);
+
+      console.log('Claim Verifications:');
+      verifications.forEach((v) => {
+        console.log(`\nClaim: ${v.claim}`);
+        console.log(`Verdict: ${v.verdict} (${(v.confidence * 100).toFixed(0)}% confidence)`);
+        console.log(`Evidence: ${v.evidence.join('; ')}`);
+      });
+    });
+  });
+
+  describe('Step 3: Publish to Shopify Blog', () => {
+    test('should create a blog post with metafields', async () => {
+      if (!process.env.SHOPIFY_ACCESS_TOKEN) {
+        console.log('Skipping - no Shopify credentials');
+        return;
+      }
+
+      // Get default blog
+      const blog = await shopifyBlog.getDefaultBlog();
+      console.log(`Using blog: ${blog.title} (${blog.id})`);
+
+      // Create sample Q&A blog post
+      const faqSchema = {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: [
+          {
+            '@type': 'Question',
+            name: 'What is the best method for brewing coffee at home?',
+            acceptedAnswer: {
+              '@type': 'Answer',
+              text: 'The best method depends on your taste preferences. French press offers rich, full-bodied coffee, while pour-over provides clean, nuanced flavors.',
+            },
+          },
+        ],
+      };
+
+      const blogPost = await shopifyBlog.createBlogPost(blog.id, {
+        title: 'What is the Best Method for Brewing Coffee at Home?',
+        bodyHtml: `
+          <h2>Understanding Coffee Brewing Methods</h2>
+          <p>Coffee brewing is both an art and a science. The method you choose significantly impacts the flavor profile of your coffee.</p>
+
+          <h2>Popular Brewing Methods</h2>
+          <h3>1. French Press</h3>
+          <p>French press brewing produces rich, full-bodied coffee with oils and sediments that enhance flavor.</p>
+
+          <h3>2. Pour-Over</h3>
+          <p>Pour-over methods like Chemex and Hario V60 create clean, nuanced coffee with precise control over brewing variables.</p>
+
+          <h3>3. Drip Coffee Maker</h3>
+          <p>Automatic drip coffee makers offer convenience and consistency for daily brewing.</p>
+
+          <h2>Choosing Your Method</h2>
+          <p>Consider these factors:</p>
+          <ul>
+            <li>Time available for brewing</li>
+            <li>Desired flavor profile</li>
+            <li>Budget for equipment</li>
+            <li>Cleanup requirements</li>
+          </ul>
+        `,
+        author: 'Coffee Expert',
+        tags: ['coffee', 'brewing', 'how-to', 'qa'],
+        published: true,
+        metafields: [
+          {
+            namespace: 'schema',
+            key: 'faq',
+            value: JSON.stringify(faqSchema),
+            type: 'json_string',
+            description: 'FAQ Schema for SEO',
+          },
+        ],
+      });
+
+      expect(blogPost.id).toBeTruthy();
+      expect(blogPost.title).toContain('Coffee');
+
+      console.log(`Created blog post: ${blogPost.id} - "${blogPost.title}"`);
+      console.log(`URL: https://${MOCK_ENV.SHOPIFY_SHOP_DOMAIN}/blogs/${blog.handle}/${blogPost.handle}`);
+    });
+  });
+
+  describe('Step 4: Publish to Shopify Pages', () => {
+    test('should create a page with schema markup', async () => {
+      if (!process.env.SHOPIFY_ACCESS_TOKEN) {
+        console.log('Skipping - no Shopify credentials');
+        return;
+      }
+
+      const howToSchema = {
+        '@context': 'https://schema.org',
+        '@type': 'HowTo',
+        name: 'How to Brew Coffee with a French Press',
+        description: 'Step-by-step guide to brewing perfect French press coffee',
+        step: [
+          {
+            '@type': 'HowToStep',
+            name: 'Heat water',
+            text: 'Heat water to 200°F (93°C)',
+          },
+          {
+            '@type': 'HowToStep',
+            name: 'Add coffee',
+            text: 'Add coarsely ground coffee (1:15 ratio)',
+          },
+          {
+            '@type': 'HowToStep',
+            name: 'Steep',
+            text: 'Steep for 4 minutes',
+          },
+          {
+            '@type': 'HowToStep',
+            name: 'Press and serve',
+            text: 'Press plunger slowly and serve immediately',
+          },
+        ],
+      };
+
+      const page = await shopifyPages.createPage({
+        title: 'How to Brew Coffee with a French Press',
+        bodyHtml: `
+          <h1>How to Brew Coffee with a French Press</h1>
+
+          <h2>What You'll Need</h2>
+          <ul>
+            <li>French press</li>
+            <li>Coarsely ground coffee</li>
+            <li>Hot water (200°F / 93°C)</li>
+            <li>Timer</li>
+          </ul>
+
+          <h2>Step-by-Step Instructions</h2>
+          <ol>
+            <li><strong>Heat water</strong> - Bring water to 200°F (93°C)</li>
+            <li><strong>Add coffee</strong> - Use 1 gram of coffee per 15ml of water</li>
+            <li><strong>Pour and stir</strong> - Pour hot water over grounds and stir gently</li>
+            <li><strong>Steep</strong> - Let coffee steep for 4 minutes</li>
+            <li><strong>Press</strong> - Slowly press the plunger down</li>
+            <li><strong>Serve immediately</strong> - Pour and enjoy!</li>
+          </ol>
+
+          <h2>Pro Tips</h2>
+          <p>For best results, use freshly roasted beans and grind just before brewing.</p>
+        `,
+        published: true,
+        metafields: [
+          {
+            namespace: 'schema',
+            key: 'how_to',
+            value: JSON.stringify(howToSchema),
+            type: 'json_string',
+            description: 'HowTo Schema for SEO',
+          },
+        ],
+      });
+
+      expect(page.id).toBeTruthy();
+      expect(page.title).toContain('French Press');
+
+      console.log(`Created page: ${page.id} - "${page.title}"`);
+      console.log(`URL: https://${MOCK_ENV.SHOPIFY_SHOP_DOMAIN}/pages/${page.handle}`);
+    });
+  });
+
+  describe('Full Workflow: Question to Published Content', () => {
+    test('should complete full Q&A content workflow', async () => {
+      console.log('\n=== FULL Q&A CONTENT WORKFLOW ===\n');
+
+      // Step 1: Discover questions
+      console.log('STEP 1: Discovering questions...');
+      if (process.env.DATAFORSEO_LOGIN) {
+        const paaQuestions = await dataForSEO.getPeopleAlsoAsk('organic coffee');
+        console.log(`✓ Found ${paaQuestions.length} PAA questions`);
+
+        if (paaQuestions.length > 0) {
+          const selectedQuestion = paaQuestions[0].question;
+          console.log(`✓ Selected question: "${selectedQuestion}"`);
+
+          // Step 2: Research question
+          if (process.env.PERPLEXITY_API_KEY) {
+            console.log('\nSTEP 2: Researching question...');
+            const research = await perplexity.research(selectedQuestion, {
+              depth: 'thorough',
+            });
+            console.log(`✓ Research complete: ${research.answer.length} chars`);
+            console.log(`✓ Citations: ${research.citations.length}`);
+
+            // Step 3: Publish to Shopify
+            if (process.env.SHOPIFY_ACCESS_TOKEN) {
+              console.log('\nSTEP 3: Publishing to Shopify...');
+              const blog = await shopifyBlog.getDefaultBlog();
+
+              const blogPost = await shopifyBlog.createBlogPost(blog.id, {
+                title: selectedQuestion,
+                bodyHtml: `<p>${research.answer}</p>`,
+                tags: ['qa', 'organic-coffee'],
+                published: true,
+              });
+
+              console.log(`✓ Published blog post: ${blogPost.id}`);
+              console.log(
+                `✓ URL: https://${MOCK_ENV.SHOPIFY_SHOP_DOMAIN}/blogs/${blog.handle}/${blogPost.handle}`
+              );
+            }
+          }
+        }
+      } else {
+        console.log('⚠ Skipping - missing API credentials');
+      }
+
+      console.log('\n=== WORKFLOW COMPLETE ===\n');
+    });
+  });
+
+  describe('Cost Tracking', () => {
+    test('should track API costs', () => {
+      console.log('\n=== API COST SUMMARY ===\n');
+
+      const dataForSEOCost = dataForSEO.getTotalCost();
+      console.log(`DataForSEO: $${dataForSEOCost.toFixed(4)}`);
+
+      const perplexityCost = perplexity.getTotalCost();
+      console.log(`Perplexity: $${perplexityCost.toFixed(4)}`);
+
+      const totalCost = dataForSEOCost + perplexityCost;
+      console.log(`\nTotal API Cost: $${totalCost.toFixed(4)}`);
+
+      expect(totalCost).toBeGreaterThanOrEqual(0);
+    });
+  });
+});

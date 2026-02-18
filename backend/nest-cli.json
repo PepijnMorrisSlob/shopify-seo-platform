@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "watchAssets": false,
+    "assets": [],
+    "watchOptions": {
+      "ignored": [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/docs/**",
+        "**/*.md",
+        "**/prisma/migrations/**",
+        "**/.git/**",
+        "**/test/**",
+        "**/*.spec.ts"
+      ]
+    }
+  }
+}
