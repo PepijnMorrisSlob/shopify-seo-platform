@@ -2,12 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npx prisma generate && npm run build"
+    "buildCommand": "npm install --no-audit --no-fund && npm run build"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate deploy && node dist/main",
-    "healthcheckPath": "/api/health",
-    "healthcheckTimeout": 300,
+    "startCommand": "npx --yes serve@14.2.4 -s dist -l $PORT",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }

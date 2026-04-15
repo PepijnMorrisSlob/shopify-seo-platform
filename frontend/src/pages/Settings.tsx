@@ -385,7 +385,7 @@ export function Settings() {
       setFormData((prev) => ({
         ...prev,
         [parentKey]: {
-          ...(prev[parentKey] as Record<string, unknown>),
+          ...(prev[parentKey] as unknown as Record<string, unknown>),
           [childKey]: value,
         },
       }));
