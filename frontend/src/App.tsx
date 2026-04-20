@@ -30,6 +30,7 @@ import { SEOAudit } from './pages/SEOAudit';
 // Pages - Agency Console
 import { AgencyDashboard } from './pages/AgencyDashboard';
 import { AgencyReviewQueue } from './pages/AgencyReviewQueue';
+import { ClientDashboard } from './pages/ClientDashboard';
 
 // Create React Query client
 const queryClient = new QueryClient({
@@ -120,6 +121,9 @@ function AppContent() {
         {/* Agency Console */}
         <Route path="/agency" element={<AgencyDashboard />} />
         <Route path="/agency/review-queue" element={<AgencyReviewQueue />} />
+
+        {/* Client-facing Dashboard */}
+        <Route path="/client" element={<ClientDashboard />} />
 
         {/* Settings */}
         <Route path="/settings" element={<Settings />} />

@@ -9,6 +9,7 @@ import { createWeeklyLinkingJob } from './weekly-linking-job';
 import { createGSCSyncJob } from './gsc-sync-job';
 import { createContentPruningJob } from './content-pruning-job';
 import { createImageCleanupJob } from './image-cleanup-job';
+import { createMonthlyReportJob } from './monthly-report-job';
 import { CronJob } from 'cron';
 
 let dailyOptimizationJob: CronJob | null = null;
@@ -16,6 +17,7 @@ let weeklyLinkingJob: CronJob | null = null;
 let gscSyncJob: CronJob | null = null;
 let contentPruningJob: CronJob | null = null;
 let imageCleanupJob: CronJob | null = null;
+let monthlyReportJob: CronJob | null = null;
 
 /**
  * Start all cron jobs
@@ -37,6 +39,9 @@ export function startAllCronJobs() {
 
   // Daily image cleanup (5 AM UTC — delete DRAFT images older than 7 days)
   imageCleanupJob = createImageCleanupJob();
+
+  // Monthly PDF report (1st of month at 6 AM UTC)
+  monthlyReportJob = createMonthlyReportJob();
 
   console.log('[CronJobs] All cron jobs started');
 }
@@ -72,6 +77,11 @@ export function stopAllCronJobs() {
     imageCleanupJob = null;
   }
 
+  if (monthlyReportJob) {
+    monthlyReportJob.stop();
+    monthlyReportJob = null;
+  }
+
   console.log('[CronJobs] All cron jobs stopped');
 }
 
@@ -99,6 +109,10 @@ export function getCronJobStatus() {
     imageCleanup: {
       running: imageCleanupJob?.running || false,
       nextRun: imageCleanupJob?.nextDate()?.toJSDate() || null,
+    },
+    monthlyReport: {
+      running: monthlyReportJob?.running || false,
+      nextRun: monthlyReportJob?.nextDate()?.toJSDate() || null,
     },
   };
 }
@@ -133,4 +147,5 @@ export {
   createGSCSyncJob,
   createContentPruningJob,
   createImageCleanupJob,
+  createMonthlyReportJob,
 };
