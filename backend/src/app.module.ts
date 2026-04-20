@@ -28,6 +28,7 @@ import { GSCController } from './controllers/gsc.controller';
 import { AgencyController } from './controllers/agency.controller';
 import { ImagesController } from './controllers/images.controller';
 import { ReportsController } from './controllers/reports.controller';
+import { BillingController } from './controllers/billing.controller';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { ReportsController } from './controllers/reports.controller';
     AgencyController,
     ImagesController,
     ReportsController,
+    BillingController,
   ],
   providers: [],
 })

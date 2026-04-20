@@ -35,6 +35,7 @@ import {
   competitorAnalysisQueue,
   CompetitorAnalysisJobData,
 } from '../queues/competitor-analysis-queue';
+import { getTierService } from '../services/tier-service';
 
 @Controller('competitors')
 export class CompetitorsController implements OnModuleInit {
@@ -480,6 +481,22 @@ export class CompetitorsController implements OnModuleInit {
       throw new HttpException(
         'No active organization found. Install the Shopify app first.',
         HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // Tier check: free plan can't add competitors at all, paid plans have a cap.
+    const tierCheck = await getTierService().canAddCompetitor(orgId);
+    if (!tierCheck.allowed) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.PAYMENT_REQUIRED,
+          error: 'Plan limit reached',
+          reason: tierCheck.reason,
+          tier: tierCheck.tier,
+          current: tierCheck.current,
+          limit: tierCheck.limit,
+        },
+        HttpStatus.PAYMENT_REQUIRED,
       );
     }
 

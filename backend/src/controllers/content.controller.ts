@@ -29,6 +29,7 @@ import { EncryptedData } from '../types/auth.types';
 import { DataForSEOService } from '../services/dataforseo-service';
 import { getAIContentService } from '../services/ai-content-service';
 import { getPublishingVelocityService } from '../services/publishing-velocity-service';
+import { getTierService } from '../services/tier-service';
 import { ContentGenerationInput } from '../types/ai.types';
 import axios from 'axios';
 
@@ -140,6 +141,23 @@ export class ContentController implements OnModuleInit {
     this.logger.log(`Generating content for ${productIds.length} products with model ${aiModel}`);
 
     const organizationId = await this.resolveOrganizationId();
+
+    // Tier check: enforce monthly content generation quota
+    const tierCheck = await getTierService().canGenerateContent(organizationId);
+    if (!tierCheck.allowed) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.PAYMENT_REQUIRED,
+          error: 'Monthly content generation limit reached',
+          reason: tierCheck.reason,
+          tier: tierCheck.tier,
+          current: tierCheck.current,
+          limit: tierCheck.limit,
+        },
+        HttpStatus.PAYMENT_REQUIRED,
+      );
+    }
+
     const contentGenerations: any[] = [];
 
     for (const productId of productIds) {
@@ -249,6 +267,22 @@ export class ContentController implements OnModuleInit {
         this.logger.log(`Generated ${variants.length} variants for product "${product.title}"`);
       } catch (error: any) {
         this.logger.error(`Failed to generate for ${productId}: ${error.message}`);
+      }
+    }
+
+    // Increment the monthly content generation counter (used by tier quota check).
+    // One counter increment per product even if N variants were generated — this
+    // aligns with how users perceive "a generation" (they click once per product).
+    if (contentGenerations.length > 0) {
+      try {
+        await this.prisma.organization.update({
+          where: { id: organizationId },
+          data: {
+            monthlyContentGens: { increment: contentGenerations.length },
+          },
+        });
+      } catch (error: any) {
+        this.logger.warn(`Failed to increment monthly content gen counter: ${error.message}`);
       }
     }
 
