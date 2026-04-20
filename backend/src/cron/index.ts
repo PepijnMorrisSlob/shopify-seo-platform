@@ -6,16 +6,21 @@
 
 import { createDailyOptimizationJob } from './daily-optimization-job';
 import { createWeeklyLinkingJob } from './weekly-linking-job';
+import { createGSCSyncJob } from './gsc-sync-job';
 import { CronJob } from 'cron';
 
 let dailyOptimizationJob: CronJob | null = null;
 let weeklyLinkingJob: CronJob | null = null;
+let gscSyncJob: CronJob | null = null;
 
 /**
  * Start all cron jobs
  */
 export function startAllCronJobs() {
   console.log('[CronJobs] Starting all scheduled jobs...');
+
+  // GSC data sync (1 AM UTC — must run before optimization)
+  gscSyncJob = createGSCSyncJob();
 
   // Daily optimization (2 AM UTC)
   dailyOptimizationJob = createDailyOptimizationJob();
@@ -42,6 +47,11 @@ export function stopAllCronJobs() {
     weeklyLinkingJob = null;
   }
 
+  if (gscSyncJob) {
+    gscSyncJob.stop();
+    gscSyncJob = null;
+  }
+
   console.log('[CronJobs] All cron jobs stopped');
 }
 
@@ -57,6 +67,10 @@ export function getCronJobStatus() {
     weeklyLinking: {
       running: weeklyLinkingJob?.running || false,
       nextRun: weeklyLinkingJob?.nextDate()?.toJSDate() || null,
+    },
+    gscSync: {
+      running: gscSyncJob?.running || false,
+      nextRun: gscSyncJob?.nextDate()?.toJSDate() || null,
     },
   };
 }
@@ -85,4 +99,4 @@ if (require.main === module) {
   console.log('[CronJobs] Cron scheduler is running. Press Ctrl+C to stop.');
 }
 
-export { createDailyOptimizationJob, createWeeklyLinkingJob };
+export { createDailyOptimizationJob, createWeeklyLinkingJob, createGSCSyncJob };

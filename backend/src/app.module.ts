@@ -24,6 +24,7 @@ import { BrandVisibilityController } from './controllers/brand-visibility.contro
 import { CompetitorsController } from './controllers/competitors.controller';
 import { KnowledgeBaseController } from './controllers/knowledge-base.controller';
 import { SEOAuditController } from './controllers/seo-audit.controller';
+import { GSCController } from './controllers/gsc.controller';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { SEOAuditController } from './controllers/seo-audit.controller';
     CompetitorsController,
     KnowledgeBaseController,
     SEOAuditController,
+    GSCController,
   ],
   providers: [],
 })

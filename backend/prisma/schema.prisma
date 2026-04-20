@@ -46,6 +46,13 @@ model Organization {
   monthlyContentGens Int       @default(0) @map("monthly_content_gens")
   lastSyncAt         DateTime? @map("last_sync_at")
 
+  // Google Search Console Integration
+  gscRefreshToken String?   @map("gsc_refresh_token")
+  gscAccessToken  String?   @map("gsc_access_token")
+  gscTokenExpiry  DateTime? @map("gsc_token_expiry")
+  gscSiteUrl      String?   @map("gsc_site_url")
+  gscConnectedAt  DateTime? @map("gsc_connected_at")
+
   // Metadata
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
