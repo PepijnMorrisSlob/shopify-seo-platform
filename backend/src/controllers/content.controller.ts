@@ -28,6 +28,7 @@ import { getEncryptionService } from '../services/encryption-service';
 import { EncryptedData } from '../types/auth.types';
 import { DataForSEOService } from '../services/dataforseo-service';
 import { getAIContentService } from '../services/ai-content-service';
+import { getPublishingVelocityService } from '../services/publishing-velocity-service';
 import { ContentGenerationInput } from '../types/ai.types';
 import axios from 'axios';
 
@@ -279,6 +280,26 @@ export class ContentController implements OnModuleInit {
 
     const organizationId = await this.resolveOrganizationId();
 
+    // Enforce publishing velocity limits (anti-spam / Google safety).
+    // If the org is over their daily or weekly limit, refuse the publish.
+    const velocityService = getPublishingVelocityService();
+    const check = await velocityService.canPublish(organizationId);
+    if (!check.allowed) {
+      this.logger.warn(
+        `Publish blocked for org ${organizationId}: ${check.reason}`,
+      );
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'Publishing velocity limit exceeded',
+          reason: check.reason,
+          counters: check.counters,
+          rampUpActive: check.rampUpActive,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     try {
       // Try QAPage first
       const qaPage = await this.prisma.qAPage.findUnique({
@@ -286,13 +307,21 @@ export class ContentController implements OnModuleInit {
       });
 
       if (qaPage) {
-        return await this.publishQAPageToShopify(qaPage, organizationId);
+        const result = await this.publishQAPageToShopify(qaPage, organizationId);
+        await velocityService.recordPublish(organizationId);
+        return result;
       }
 
       // Product flow - update product SEO meta on Shopify
       const product = await this.findProduct(contentGenerationId);
       if (product) {
-        return await this.publishProductSEOToShopify(product, variantId, organizationId);
+        const result = await this.publishProductSEOToShopify(
+          product,
+          variantId,
+          organizationId,
+        );
+        await velocityService.recordPublish(organizationId);
+        return result;
       }
 
       throw new HttpException(
@@ -307,6 +336,17 @@ export class ContentController implements OnModuleInit {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  /**
+   * Get current publishing velocity counters for an organization.
+   * GET /api/content/velocity?organizationId=...
+   */
+  @Get('velocity')
+  async getVelocity(@Query('organizationId') organizationId?: string) {
+    const orgId = organizationId || (await this.resolveOrganizationId());
+    const velocity = getPublishingVelocityService();
+    return velocity.getCounters(orgId);
   }
 
   /**

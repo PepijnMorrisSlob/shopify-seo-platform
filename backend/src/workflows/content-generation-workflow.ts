@@ -29,6 +29,7 @@ import { ShopifyBlogService } from '../services/shopify-blog-service';
 import { BusinessProfileRepository } from '../repositories/business-profile.repository';
 import { QAPageRepository } from '../repositories/qa-page.repository';
 import { InternalLinkRepository } from '../repositories/internal-link.repository';
+import { getPublishingVelocityService } from '../services/publishing-velocity-service';
 
 export interface ContentGenerationWorkflowInput {
   questionId: string;
@@ -199,6 +200,26 @@ export class ContentGenerationWorkflow {
 
       if (seoValidation.overallScore >= 85 && !input.skipPublishing) {
         try {
+          // Anti-spam gate: do not auto-publish if the org has hit their daily/weekly limit.
+          // The content still gets saved with status 'pending_review' so the team can
+          // approve it later when the velocity window resets.
+          const velocity = getPublishingVelocityService();
+          const velocityCheck = await velocity.canPublish(input.organizationId);
+          if (!velocityCheck.allowed) {
+            console.warn(
+              `[ContentGenerationWorkflow] Auto-publish blocked by velocity limit: ${velocityCheck.reason}`,
+            );
+            // Downgrade to pending_review so a human can approve later.
+            await this.qaPageRepo.update(qaPage.id, { status: 'pending_review' });
+            return {
+              success: true,
+              qaPageId: qaPage.id,
+              seoScore: seoValidation.overallScore,
+              status: 'pending_review',
+              error: `Auto-publish deferred: ${velocityCheck.reason}`,
+            };
+          }
+
           const shopifyBlogService = await this.getShopifyBlogService(input.organizationId);
 
           if (shopifyBlogService) {
@@ -236,6 +257,10 @@ export class ContentGenerationWorkflow {
               shopifyBlogPostId: blogPost.id,
               shopifyUrl,
             });
+
+            // Record the publish against the org's velocity counter so we
+            // don't exceed the daily/weekly publishing limits.
+            await getPublishingVelocityService().recordPublish(input.organizationId);
 
             console.log(`[ContentGenerationWorkflow] Published to Shopify: ${shopifyUrl}`);
           }
