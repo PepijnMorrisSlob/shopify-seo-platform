@@ -25,6 +25,7 @@ import { CompetitorsController } from './controllers/competitors.controller';
 import { KnowledgeBaseController } from './controllers/knowledge-base.controller';
 import { SEOAuditController } from './controllers/seo-audit.controller';
 import { GSCController } from './controllers/gsc.controller';
+import { AgencyController } from './controllers/agency.controller';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { GSCController } from './controllers/gsc.controller';
     KnowledgeBaseController,
     SEOAuditController,
     GSCController,
+    AgencyController,
   ],
   providers: [],
 })

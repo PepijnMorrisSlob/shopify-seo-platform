@@ -105,8 +105,12 @@ model User {
 
   // Authentication
   passwordHash String?  @map("password_hash") // For non-Shopify users
-  role         UserRole @default(MEMBER)
+  role         UserRole @default(CLIENT_VIEWER)
   permissions  String[] // Array of permission strings
+
+  // Agency multi-org access — agency users see multiple client orgs
+  assignedOrganizations String[] @map("assigned_organizations")
+  agencyId              String?  @map("agency_id")
 
   // Session Management
   lastLoginAt    DateTime? @map("last_login_at")
@@ -125,10 +129,18 @@ model User {
   @@index([organizationId])
   @@index([email])
   @@index([organizationId, isActive])
+  @@index([agencyId])
   @@map("users")
 }
 
 enum UserRole {
+  // Agency-side roles
+  AGENCY_ADMIN  // Full access to all client orgs under this agency
+  AGENCY_MEMBER // Access to assigned client orgs only
+  // Client-side roles (per organization)
+  CLIENT_ADMIN  // Full access to own org (equivalent to legacy OWNER)
+  CLIENT_VIEWER // Read-only access to own org (reports + dashboard)
+  // Legacy — kept for backward compat with existing rows; see rbac mapping
   OWNER
   ADMIN
   MEMBER
