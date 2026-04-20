@@ -440,8 +440,11 @@ export function buildPrompt(
     prompt = prompt.replace(new RegExp(placeholder, 'g'), String(value || ''));
   }
 
-  // Remove any remaining unreplaced placeholders
-  prompt = prompt.replace(/\{[^}]+\}/g, '');
+  // Remove any remaining unreplaced placeholders. Only strip things that look
+  // like simple variable names (letters/digits/underscores inside braces) so
+  // we don't accidentally delete JSON examples like {"metaTitle": "..."} that
+  // are part of the prompt's output instructions.
+  prompt = prompt.replace(/\{[a-zA-Z_][a-zA-Z0-9_]*\}/g, '');
 
   return prompt;
 }
