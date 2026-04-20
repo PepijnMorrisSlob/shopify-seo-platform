@@ -47,7 +47,7 @@ export class CalendarController {
   private async resolveOrganizationId(
     organizationId?: string,
     shop?: string
-  ): Promise<string> {
+  ): Promise<string | null> {
     // If organizationId provided directly, use it
     if (organizationId) {
       return organizationId;
@@ -59,13 +59,7 @@ export class CalendarController {
         where: { shopifyDomain: shop },
         select: { id: true },
       });
-      if (org) {
-        return org.id;
-      }
-      throw new HttpException(
-        `Organization not found for shop: ${shop}`,
-        HttpStatus.NOT_FOUND
-      );
+      return org?.id || null;
     }
 
     // Fall back to first active organization. This matches the pattern used
@@ -75,14 +69,25 @@ export class CalendarController {
       where: { isActive: true },
       select: { id: true },
     });
-    if (firstOrg) {
-      return firstOrg.id;
-    }
+    return firstOrg?.id || null;
+  }
 
-    throw new HttpException(
-      'No active organization found. Install the Shopify app first.',
-      HttpStatus.BAD_REQUEST
-    );
+  /**
+   * Same as resolveOrganizationId but throws 400 when no org found.
+   * Use for write/detail operations where an org is required.
+   */
+  private async requireOrganizationId(
+    organizationId?: string,
+    shop?: string,
+  ): Promise<string> {
+    const id = await this.resolveOrganizationId(organizationId, shop);
+    if (!id) {
+      throw new HttpException(
+        'No active organization found. Install the Shopify app first.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return id;
   }
 
   /**
@@ -99,8 +104,12 @@ export class CalendarController {
     @Query('type') contentType?: string,
     @Query('status') status?: string
   ) {
-    // Resolve organization from shop or organizationId
+    // Resolve organization from shop or organizationId. If no org exists yet
+    // (before Shopify app install), return an empty calendar instead of 400.
     const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    if (!resolvedOrgId) {
+      return { success: true, items: [], total: 0 };
+    }
 
     // Default date range to current month if not provided
     const now = new Date();
@@ -153,7 +162,7 @@ export class CalendarController {
     @Query('organizationId') organizationId: string,
     @Query('shop') shop: string
   ) {
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
     const item = await this.calendarService.getItem(id, resolvedOrgId);
 
     return {
@@ -172,7 +181,7 @@ export class CalendarController {
     @Body() body: CreateContentItemDto & { organizationId?: string; shop?: string }
   ) {
     const { organizationId, shop, ...data } = body;
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
 
     const item = await this.calendarService.createItem(resolvedOrgId, data);
 
@@ -194,7 +203,7 @@ export class CalendarController {
     @Body() body: RescheduleDto & { organizationId?: string; shop?: string }
   ) {
     const { organizationId, shop, scheduledAt } = body;
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
 
     if (!scheduledAt) {
       throw new HttpException('scheduledAt is required', HttpStatus.BAD_REQUEST);
@@ -225,7 +234,7 @@ export class CalendarController {
     @Body() body: UpdateStatusDto & { organizationId?: string; shop?: string }
   ) {
     const { organizationId, shop, status } = body;
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
 
     if (!status) {
       throw new HttpException('status is required', HttpStatus.BAD_REQUEST);
@@ -251,7 +260,7 @@ export class CalendarController {
     @Body() body: Partial<CreateContentItemDto> & { organizationId?: string; shop?: string }
   ) {
     const { organizationId, shop, ...data } = body;
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
 
     const item = await this.calendarService.updateItem(id, resolvedOrgId, data);
 
@@ -272,7 +281,7 @@ export class CalendarController {
     @Query('organizationId') organizationId: string,
     @Query('shop') shop: string
   ) {
-    const resolvedOrgId = await this.resolveOrganizationId(organizationId, shop);
+    const resolvedOrgId = await this.requireOrganizationId(organizationId, shop);
 
     await this.calendarService.deleteItem(id, resolvedOrgId);
 
