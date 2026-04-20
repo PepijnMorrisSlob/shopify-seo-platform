@@ -68,19 +68,19 @@ export class CalendarController {
       );
     }
 
-    // DEV MODE: Use first organization if in development
-    if (process.env.NODE_ENV === 'development') {
-      const firstOrg = await this.prisma.organization.findFirst({
-        select: { id: true },
-      });
-      if (firstOrg) {
-        console.log('[CalendarController] DEV MODE: Using first organization:', firstOrg.id);
-        return firstOrg.id;
-      }
+    // Fall back to first active organization. This matches the pattern used
+    // across other controllers (analytics, products, competitors) and lets
+    // single-tenant deployments work without passing orgId on every request.
+    const firstOrg = await this.prisma.organization.findFirst({
+      where: { isActive: true },
+      select: { id: true },
+    });
+    if (firstOrg) {
+      return firstOrg.id;
     }
 
     throw new HttpException(
-      'organizationId or shop parameter is required',
+      'No active organization found. Install the Shopify app first.',
       HttpStatus.BAD_REQUEST
     );
   }

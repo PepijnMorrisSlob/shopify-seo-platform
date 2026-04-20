@@ -154,15 +154,9 @@ export class ProductsController {
       orderBy: { updatedAt: 'desc' },
     });
 
-    if (products.length === 0) {
-      return {
-        products: [],
-        total: 0,
-        message:
-          'No products synced yet. Click "Sync Products" to import from your Shopify store.',
-      };
-    }
-
+    // Always return an array — the frontend useProducts hook expects Product[]
+    // directly. Empty array signals no products synced yet; the UI shows the
+    // "Sync Products" CTA when length is 0.
     return products.map((p) => this.mapProductToFrontend(p));
   }
 

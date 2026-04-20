@@ -89,14 +89,25 @@ export class CompetitorsController implements OnModuleInit {
     const topics = (record.contentTopics as any[]) || [];
     const gaps = (record.contentGaps as any[]) || [];
 
+    // Estimated monthly traffic: sum of each keyword's volume × CTR-by-position
+    const estimatedTraffic = keywords.reduce((sum: number, kw: any) => {
+      const v = kw.search_volume || 0;
+      const pos = kw.position || 100;
+      const ctr = pos <= 3 ? 0.3 : pos <= 10 ? 0.1 : pos <= 20 ? 0.03 : 0.005;
+      return sum + Math.round(v * ctr);
+    }, 0);
+
     return {
       id: record.id,
       competitorUrl: record.competitorUrl,
       competitorName:
         record.competitorName || this.extractDomainName(record.competitorUrl),
+      estimatedTraffic,
       keywordCount: keywords.length,
-      topKeywords: keywords.slice(0, 10),
-      contentTopics: topics.slice(0, 10),
+      overlapPercentage: 0, // populated by list endpoint when org context is available
+      contentTopics: topics.map((t: any) => t.title || t.topic || '').filter(Boolean).slice(0, 10),
+      topKeywords: keywords.slice(0, 10).map((k: any) => k.keyword || '').filter(Boolean),
+      keywordsTheyRankFor: keywords.slice(0, 20),
       contentGaps: gaps.slice(0, 10),
       lastAnalyzedAt: record.lastAnalyzedAt?.toISOString() || null,
       status: record.lastAnalyzedAt ? 'analyzed' : 'pending',
@@ -129,49 +140,169 @@ export class CompetitorsController implements OnModuleInit {
   @Get('overview')
   async getOverview(@Query('organizationId') organizationId?: string) {
     const orgId = await this.resolveOrganizationId(organizationId);
+
+    const empty = {
+      ourTraffic: 0,
+      avgCompetitorTraffic: 0,
+      keywordOverlapPercent: 0,
+      contentGapsFound: 0,
+      keywordGapsFound: 0,
+      competitiveScore: 0,
+      competitorsTracked: 0,
+      topOpportunity: null as string | null,
+      trafficComparison: [] as Array<{
+        name: string;
+        traffic: number;
+        keywords: number;
+        overlap: number;
+      }>,
+    };
+
     if (!orgId) {
-      return {
-        competitorsTracked: 0,
-        totalKeywordGaps: 0,
-        totalContentGaps: 0,
-        message: 'No organization resolved.',
-      };
+      return { ...empty, message: 'No organization resolved.' };
     }
 
-    const competitors = await this.prisma.competitor.findMany({
-      where: { organizationId: orgId },
-    });
+    const [competitors, qaPages] = await Promise.all([
+      this.prisma.competitor.findMany({ where: { organizationId: orgId } }),
+      this.prisma.qAPage.findMany({
+        where: { organizationId: orgId, status: 'published' },
+        select: { monthlyTraffic: true, seoScore: true },
+      }),
+    ]);
 
     if (competitors.length === 0) {
       return {
-        competitorsTracked: 0,
-        totalKeywordGaps: 0,
-        totalContentGaps: 0,
-        totalAnalyzed: 0,
-        avgOverlapPercentage: 0,
+        ...empty,
         message:
           'No competitors tracked. Add a competitor URL and run analysis to see gaps.',
       };
     }
 
-    const totalKeywordGaps = competitors.reduce((sum, c) => {
-      const kws = (c.keywordsTheyRankFor as any[]) || [];
-      return sum + kws.length;
-    }, 0);
+    // Our traffic = sum of real monthly traffic on published QA pages
+    const ourTraffic = qaPages.reduce(
+      (sum, p) => sum + (p.monthlyTraffic || 0),
+      0,
+    );
 
-    const totalContentGaps = competitors.reduce((sum, c) => {
+    // Build per-competitor rollup
+    const perCompetitor = competitors.map((c) => {
+      const keywords = (c.keywordsTheyRankFor as any[]) || [];
+      const topics = (c.contentTopics as any[]) || [];
+
+      // Traffic estimate: sum of each keyword's estimated click share
+      // (search_volume * CTR proxy based on position)
+      const traffic = keywords.reduce((sum: number, kw: any) => {
+        const v = kw.search_volume || 0;
+        const pos = kw.position || 100;
+        const ctr = pos <= 3 ? 0.3 : pos <= 10 ? 0.1 : pos <= 20 ? 0.03 : 0.005;
+        return sum + Math.round(v * ctr);
+      }, 0);
+
+      // Alt source: top pages traffic
+      const pageTraffic = topics.reduce(
+        (sum: number, p: any) => sum + (p.traffic || 0),
+        0,
+      );
+
+      return {
+        id: c.id,
+        name: c.competitorName || this.extractDomainName(c.competitorUrl),
+        traffic: Math.max(traffic, pageTraffic),
+        keywordCount: keywords.length,
+      };
+    });
+
+    // Overlap percent: keywords both we and competitors target
+    const ourKeywords = await this.prisma.keyword.findMany({
+      where: { organizationId: orgId },
+      select: { keyword: true },
+    });
+    const ourSet = new Set(ourKeywords.map((k) => k.keyword.toLowerCase()));
+    let overlapTotal = 0;
+    let overlapCompetitorKeywords = 0;
+    for (const c of competitors) {
+      const kws = (c.keywordsTheyRankFor as any[]) || [];
+      overlapCompetitorKeywords += kws.length;
+      for (const kw of kws) {
+        if (kw.keyword && ourSet.has(kw.keyword.toLowerCase())) overlapTotal++;
+      }
+    }
+    const keywordOverlapPercent =
+      overlapCompetitorKeywords > 0
+        ? Math.round((overlapTotal / overlapCompetitorKeywords) * 100)
+        : 0;
+
+    // Keyword gaps: competitor-unique keywords
+    const keywordGapsFound = overlapCompetitorKeywords - overlapTotal;
+
+    // Content gaps from stored analysis
+    const contentGapsFound = competitors.reduce((sum, c) => {
       const gaps = (c.contentGaps as any[]) || [];
       return sum + gaps.length;
     }, 0);
 
-    const analyzedCount = competitors.filter((c) => c.lastAnalyzedAt).length;
+    const avgCompetitorTraffic =
+      perCompetitor.length > 0
+        ? Math.round(
+            perCompetitor.reduce((sum, c) => sum + c.traffic, 0) /
+              perCompetitor.length,
+          )
+        : 0;
+
+    // Competitive score: how we compare vs avg competitor on traffic + content depth
+    const trafficRatio =
+      avgCompetitorTraffic > 0 ? ourTraffic / avgCompetitorTraffic : 0;
+    const contentRatio =
+      keywordGapsFound > 0
+        ? Math.max(0, 1 - keywordGapsFound / overlapCompetitorKeywords)
+        : 1;
+    const competitiveScore = Math.round(
+      Math.min(100, 100 * (0.6 * Math.min(1, trafficRatio) + 0.4 * contentRatio)),
+    );
+
+    // Top opportunity = highest-volume keyword gap across competitors
+    let topOpportunity: string | null = null;
+    let topVolume = 0;
+    for (const c of competitors) {
+      const kws = (c.keywordsTheyRankFor as any[]) || [];
+      for (const kw of kws) {
+        if (!kw.keyword || ourSet.has(kw.keyword.toLowerCase())) continue;
+        if ((kw.search_volume || 0) > topVolume) {
+          topVolume = kw.search_volume;
+          topOpportunity = kw.keyword;
+        }
+      }
+    }
+
+    // Traffic comparison: "Us" + top 4 competitors by traffic
+    const trafficComparison = [
+      {
+        name: 'Us',
+        traffic: ourTraffic,
+        keywords: ourKeywords.length,
+        overlap: 100,
+      },
+      ...perCompetitor
+        .sort((a, b) => b.traffic - a.traffic)
+        .slice(0, 4)
+        .map((c) => ({
+          name: c.name,
+          traffic: c.traffic,
+          keywords: c.keywordCount,
+          overlap: keywordOverlapPercent,
+        })),
+    ];
 
     return {
+      ourTraffic,
+      avgCompetitorTraffic,
+      keywordOverlapPercent,
+      contentGapsFound,
+      keywordGapsFound,
+      competitiveScore,
       competitorsTracked: competitors.length,
-      totalAnalyzed: analyzedCount,
-      totalKeywordGaps,
-      totalContentGaps,
-      pendingAnalysis: competitors.length - analyzedCount,
+      topOpportunity,
+      trafficComparison,
     };
   }
 
@@ -217,19 +348,30 @@ export class CompetitorsController implements OnModuleInit {
       const keywords = (c.keywordsTheyRankFor as any[]) || [];
       for (const kw of keywords) {
         if (!kw.keyword || ourSet.has(kw.keyword.toLowerCase())) continue;
+        const searchVolume = kw.search_volume || 0;
+        const position = kw.position || 0;
+        // Opportunity score: favor high volume where competitor is in top 20
+        const volumeScore = Math.min(
+          60,
+          Math.log10(Math.max(1, searchVolume)) * 15,
+        );
+        const positionScore =
+          position > 0 && position <= 20 ? (20 - position) * 2 : 0;
         gaps.push({
           keyword: kw.keyword,
-          searchVolume: kw.search_volume || 0,
-          competitorPosition: kw.position || 0,
+          searchVolume,
+          difficulty: kw.keyword_difficulty || 0,
+          competitorPosition: position,
           competitor:
             c.competitorName || this.extractDomainName(c.competitorUrl),
           competitorId: c.id,
           url: kw.url || '',
+          opportunityScore: Math.round(Math.min(100, volumeScore + positionScore)),
         });
       }
     }
 
-    gaps.sort((a, b) => b.searchVolume - a.searchVolume);
+    gaps.sort((a, b) => b.opportunityScore - a.opportunityScore);
 
     const analyzedCount = competitors.filter((c) => c.lastAnalyzedAt).length;
 
@@ -280,10 +422,14 @@ export class CompetitorsController implements OnModuleInit {
       const contentGaps = (c.contentGaps as any[]) || [];
       for (const gap of contentGaps) {
         gaps.push({
-          ...gap,
+          topic: gap.topic || gap.title || '',
           competitor:
             c.competitorName || this.extractDomainName(c.competitorUrl),
           competitorId: c.id,
+          competitorUrl: gap.competitorUrl || gap.url || c.competitorUrl,
+          estimatedTraffic: gap.estimatedTraffic || gap.traffic || 0,
+          estTraffic: gap.estimatedTraffic || gap.traffic || 0, // alias for frontend
+          priority: gap.priority || 'medium',
         });
       }
     }

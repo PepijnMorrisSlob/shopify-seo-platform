@@ -57,7 +57,7 @@ import {
 // API
 // ---------------------------------------------------------------------------
 
-const API_BASE = 'http://localhost:3003/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3003/api';
 
 async function fetchClusters() {
   const res = await fetch(`${API_BASE}/topical-map/clusters`);
