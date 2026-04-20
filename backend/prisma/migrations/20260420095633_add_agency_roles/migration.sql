@@ -1,20 +1,17 @@
--- AlterEnum
--- This migration adds more than one value to an enum.
--- With PostgreSQL versions 11 and earlier, this is not possible
--- in a single migration. This can be worked around by creating
--- multiple migrations, each migration adding only one value to
--- the enum.
+-- Add new enum values. PostgreSQL requires ALTER TYPE ADD VALUE to commit
+-- before the new values can be referenced (e.g., as a column default). Each
+-- ALTER TYPE runs as its own transaction via prisma migrate.
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'AGENCY_ADMIN';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'AGENCY_MEMBER';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'CLIENT_ADMIN';
+ALTER TYPE "UserRole" ADD VALUE IF NOT EXISTS 'CLIENT_VIEWER';
 
+-- Commit enum changes so the new values are usable below.
+COMMIT;
 
-ALTER TYPE "UserRole" ADD VALUE 'AGENCY_ADMIN';
-ALTER TYPE "UserRole" ADD VALUE 'AGENCY_MEMBER';
-ALTER TYPE "UserRole" ADD VALUE 'CLIENT_ADMIN';
-ALTER TYPE "UserRole" ADD VALUE 'CLIENT_VIEWER';
+-- Add new columns and update default. Idempotent with IF NOT EXISTS.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "agency_id" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "assigned_organizations" TEXT[];
+ALTER TABLE "users" ALTER COLUMN "role" SET DEFAULT 'CLIENT_VIEWER';
 
--- AlterTable
-ALTER TABLE "users" ADD COLUMN     "agency_id" TEXT,
-ADD COLUMN     "assigned_organizations" TEXT[],
-ALTER COLUMN "role" SET DEFAULT 'CLIENT_VIEWER';
-
--- CreateIndex
-CREATE INDEX "users_agency_id_idx" ON "users"("agency_id");
+CREATE INDEX IF NOT EXISTS "users_agency_id_idx" ON "users"("agency_id");
