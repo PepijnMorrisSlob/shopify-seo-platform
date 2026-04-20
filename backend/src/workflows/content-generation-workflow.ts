@@ -21,7 +21,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import AIContentService from '../services/ai-content-service';
-import PerplexityService from '../services/perplexity-service';
+import { GeminiService } from '../services/gemini-service';
 import AdvancedInternalLinkingService from '../services/advanced-internal-linking-service';
 import SchemaService from '../services/schema-service';
 import SEOValidatorService from '../services/seo-validator-service';
@@ -30,6 +30,7 @@ import { BusinessProfileRepository } from '../repositories/business-profile.repo
 import { QAPageRepository } from '../repositories/qa-page.repository';
 import { InternalLinkRepository } from '../repositories/internal-link.repository';
 import { getPublishingVelocityService } from '../services/publishing-velocity-service';
+import { getImageStorageService } from '../services/image-storage-service';
 
 export interface ContentGenerationWorkflowInput {
   questionId: string;
@@ -51,7 +52,7 @@ export interface ContentGenerationWorkflowResult {
 
 export class ContentGenerationWorkflow {
   private aiContentService: AIContentService;
-  private perplexityService: PerplexityService;
+  private researchService: GeminiService;
   private internalLinkingService: AdvancedInternalLinkingService;
   private schemaService: SchemaService;
   private seoValidatorService: SEOValidatorService;
@@ -61,7 +62,7 @@ export class ContentGenerationWorkflow {
 
   constructor(private prisma: PrismaClient) {
     this.aiContentService = new AIContentService();
-    this.perplexityService = new PerplexityService();
+    this.researchService = new GeminiService();
     this.internalLinkingService = new AdvancedInternalLinkingService();
     this.schemaService = new SchemaService();
     this.seoValidatorService = new SEOValidatorService();
@@ -85,7 +86,7 @@ export class ContentGenerationWorkflow {
 
       // Step 2: Research the question (Perplexity)
       console.log('[ContentGenerationWorkflow] Step 1/8: Researching question...');
-      const research = await this.perplexityService.research(input.question, {
+      const research = await this.researchService.research(input.question, {
         depth: (businessProfile.advancedSettings as any)?.factCheckingLevel || 'thorough',
       });
 
@@ -154,6 +155,32 @@ export class ContentGenerationWorkflow {
         metaDescription,
       });
 
+      // Generate a featured image with Gemini. Runs in parallel with the DB
+      // write in principle, but we await it first so the image URL lands on
+      // the created QAPage atomically. Failure is non-fatal — the post just
+      // ships without an image.
+      let featuredImageUrl: string | undefined;
+      try {
+        const imagePrompt = this.buildFeaturedImagePrompt(
+          input.question,
+          targetKeyword,
+          businessProfile as any,
+        );
+        console.log(
+          '[ContentGenerationWorkflow] Step 5.5/8: Generating featured image...',
+        );
+        const imageResult = await getImageStorageService().generateAndStore({
+          organizationId: input.organizationId,
+          prompt: imagePrompt,
+          options: { aspectRatio: '16:9' },
+        });
+        featuredImageUrl = imageResult.url;
+      } catch (imgErr: any) {
+        console.warn(
+          `[ContentGenerationWorkflow] Featured image generation failed (non-fatal): ${imgErr.message}`,
+        );
+      }
+
       // Step 7: Save to database
       console.log('[ContentGenerationWorkflow] Step 6/8: Saving to database...');
       const qaPage = await this.qaPageRepo.create({
@@ -161,6 +188,7 @@ export class ContentGenerationWorkflow {
         question: input.question,
         answerContent: linkedContent,
         answerMarkdown: linkedContent, // Would convert HTML to Markdown in production
+        featuredImageUrl,
         targetKeyword,
         metaTitle,
         metaDescription,
@@ -288,6 +316,21 @@ export class ContentGenerationWorkflow {
         error: error.message || 'Unknown error',
       };
     }
+  }
+
+  /**
+   * Build a featured-image prompt tailored to the QA content and brand voice.
+   */
+  private buildFeaturedImagePrompt(
+    question: string,
+    targetKeyword: string,
+    businessProfile: any,
+  ): string {
+    const industry = businessProfile?.industry || 'ecommerce';
+    const tone = businessProfile?.brandVoice?.tone || 'professional';
+    const subject = question.replace(/^(how to|why|what|when|where|who)\s+/i, '');
+
+    return `A high-quality featured blog image for an e-commerce ${industry} brand. Topic: ${subject}. Include subtle visual cues related to "${targetKeyword}". Photography style, ${tone} mood, natural lighting, no text overlay, no watermarks, no logos. Composition suited for a 16:9 blog hero.`;
   }
 
   /**

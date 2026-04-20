@@ -69,6 +69,7 @@ model Organization {
   qaPages            QAPage[]
   competitors        Competitor[]
   contentItems       ContentItem[]
+  generatedImages    GeneratedImage[]
 
   @@index([shopifyDomain])
   @@index([planTier, billingStatus])
@@ -821,4 +822,52 @@ model Competitor {
   @@unique([organizationId, competitorUrl])
   @@index([organizationId])
   @@map("competitors")
+}
+
+// ============================================================================
+// GENERATED IMAGES (Gemini 2.5 Flash Image - "Nano Banana")
+// ============================================================================
+//
+// Tracks AI-generated images with a DRAFT → SAVED → PUBLISHED lifecycle.
+// DRAFT images auto-delete after 7 days (see image-cleanup-job cron).
+// SAVED means user explicitly kept it in their library.
+// PUBLISHED means the image is in use by a QA page or product.
+
+model GeneratedImage {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+
+  // Generation details
+  prompt       String       @db.Text
+  model        String       @default("gemini-2.5-flash-image")
+  filename     String // UUID-based filename on disk
+  mimeType     String       @map("mime_type")
+  sizeBytes    Int          @map("size_bytes")
+  aspectRatio  String?      @map("aspect_ratio")
+
+  // Lifecycle
+  status       ImageStatus  @default(DRAFT)
+  savedAt      DateTime?    @map("saved_at")
+
+  // Soft references to content using this image
+  usedByPageId    String? @map("used_by_page_id")
+  usedByProductId String? @map("used_by_product_id")
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([status, createdAt])
+  @@map("generated_images")
+}
+
+enum ImageStatus {
+  DRAFT     // Auto-deleted after 7 days if not saved
+  SAVED     // User kept in library
+  PUBLISHED // In use by content
 }

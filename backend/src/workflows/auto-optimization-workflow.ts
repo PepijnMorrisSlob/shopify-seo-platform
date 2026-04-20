@@ -25,7 +25,7 @@
 import { PrismaClient } from '@prisma/client';
 import AutoOptimizationService from '../services/auto-optimization-service';
 import AIContentService from '../services/ai-content-service';
-import PerplexityService from '../services/perplexity-service';
+import { GeminiService } from '../services/gemini-service';
 import AdvancedInternalLinkingService from '../services/advanced-internal-linking-service';
 import SEOValidatorService from '../services/seo-validator-service';
 import { ShopifyBlogService } from '../services/shopify-blog-service';
@@ -54,7 +54,7 @@ export interface OptimizationWorkflowResult {
 export class AutoOptimizationWorkflow {
   private autoOptimizationService: AutoOptimizationService;
   private aiContentService: AIContentService;
-  private perplexityService: PerplexityService;
+  private researchService: GeminiService;
   private internalLinkingService: AdvancedInternalLinkingService;
   private seoValidatorService: SEOValidatorService;
   private qaPageRepo: QAPageRepository;
@@ -62,7 +62,7 @@ export class AutoOptimizationWorkflow {
   constructor(private prisma: PrismaClient) {
     this.autoOptimizationService = new AutoOptimizationService();
     this.aiContentService = new AIContentService();
-    this.perplexityService = new PerplexityService();
+    this.researchService = new GeminiService();
     this.internalLinkingService = new AdvancedInternalLinkingService();
     this.seoValidatorService = new SEOValidatorService();
     this.qaPageRepo = new QAPageRepository(prisma);

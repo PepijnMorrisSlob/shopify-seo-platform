@@ -7,15 +7,15 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { OptimizationAnalysis, OptimizationIssue, ContentPerformance } from '../types/qa-content.types';
-import PerplexityService from './perplexity-service';
+import { GeminiService } from './gemini-service';
 
 export class AutoOptimizationService {
   private anthropic: Anthropic;
-  private perplexity: PerplexityService;
+  private researchService: GeminiService;
 
   constructor() {
     this.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    this.perplexity = new PerplexityService();
+    this.researchService = new GeminiService();
   }
 
   /**
@@ -81,7 +81,7 @@ export class AutoOptimizationService {
     console.log(`[AutoOptimization] Refreshing content for page ${pageId}...`);
 
     // Research latest information
-    const research = await this.perplexity.research(topic, {
+    const research = await this.researchService.research(topic, {
       depth: 'thorough',
       dateFilter: 'last_6_months',
     });

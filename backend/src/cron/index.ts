@@ -8,12 +8,14 @@ import { createDailyOptimizationJob } from './daily-optimization-job';
 import { createWeeklyLinkingJob } from './weekly-linking-job';
 import { createGSCSyncJob } from './gsc-sync-job';
 import { createContentPruningJob } from './content-pruning-job';
+import { createImageCleanupJob } from './image-cleanup-job';
 import { CronJob } from 'cron';
 
 let dailyOptimizationJob: CronJob | null = null;
 let weeklyLinkingJob: CronJob | null = null;
 let gscSyncJob: CronJob | null = null;
 let contentPruningJob: CronJob | null = null;
+let imageCleanupJob: CronJob | null = null;
 
 /**
  * Start all cron jobs
@@ -32,6 +34,9 @@ export function startAllCronJobs() {
 
   // Weekly content pruning (Sunday 4 AM UTC — after linking)
   contentPruningJob = createContentPruningJob();
+
+  // Daily image cleanup (5 AM UTC — delete DRAFT images older than 7 days)
+  imageCleanupJob = createImageCleanupJob();
 
   console.log('[CronJobs] All cron jobs started');
 }
@@ -62,6 +67,11 @@ export function stopAllCronJobs() {
     contentPruningJob = null;
   }
 
+  if (imageCleanupJob) {
+    imageCleanupJob.stop();
+    imageCleanupJob = null;
+  }
+
   console.log('[CronJobs] All cron jobs stopped');
 }
 
@@ -85,6 +95,10 @@ export function getCronJobStatus() {
     contentPruning: {
       running: contentPruningJob?.running || false,
       nextRun: contentPruningJob?.nextDate()?.toJSDate() || null,
+    },
+    imageCleanup: {
+      running: imageCleanupJob?.running || false,
+      nextRun: imageCleanupJob?.nextDate()?.toJSDate() || null,
     },
   };
 }
@@ -118,4 +132,5 @@ export {
   createWeeklyLinkingJob,
   createGSCSyncJob,
   createContentPruningJob,
+  createImageCleanupJob,
 };

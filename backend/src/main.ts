@@ -10,11 +10,24 @@
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { join } from 'path';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
+
+  // Serve generated images from the Railway volume at /uploads/<filename>.
+  const uploadDir = process.env.UPLOAD_DIR || '/app/uploads';
+  app.useStaticAssets(uploadDir, {
+    prefix: '/uploads/',
+    setHeaders: (res) => {
+      // Cache generated images aggressively — filenames include UUIDs so
+      // content is effectively immutable.
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
   });
 
   // Enable CORS for frontend (allow multiple dev ports)
