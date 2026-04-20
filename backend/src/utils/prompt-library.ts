@@ -51,6 +51,67 @@ Format: Return 3 variants as JSON array:
     ],
   },
 
+  // PRODUCT META PAIR (one title + description together as structured JSON)
+  product_meta_pair: {
+    id: 'product_meta_pair',
+    name: 'Product Meta Title + Description Pair',
+    contentType: 'product_meta',
+    template: `Generate one SEO-optimized meta title AND meta description for this Shopify product. Return ONE unique variant.
+
+Product:
+- Title: {productTitle}
+- Type: {productType}
+- Vendor: {vendor}
+- Description: {productDescription}
+- Tags: {tags}
+
+Target keyword: {targetKeyword}
+Keyword search volume: {searchVolume}
+Keyword difficulty (0-100): {difficulty}
+Cost per click: $\{cpc\}
+
+Brand voice: {brandVoice}
+Tone: {tone}
+
+Requirements for meta title:
+- MUST be 50-60 characters (Google truncates longer)
+- Include the target keyword naturally near the start
+- End with vendor or category, separated by " | " or " - "
+- Avoid ALL CAPS or gimmicky words
+
+Requirements for meta description:
+- MUST be 150-160 characters
+- Include target keyword in first half
+- End with a natural call-to-action (Shop, Discover, Browse, etc.)
+- Match the brand tone
+- Don't make claims that aren't in the product description
+
+Return ONE variant as strict JSON with no extra commentary:
+{
+  "metaTitle": "...",
+  "metaDescription": "...",
+  "angle": "benefit-focused | problem-solution | value-proposition | feature-rich | authority",
+  "reasoning": "Brief 1-sentence explanation of the strategy used and expected CTR impact."
+}`,
+    variables: [
+      'productTitle',
+      'productType',
+      'vendor',
+      'productDescription',
+      'tags',
+      'targetKeyword',
+      'searchVolume',
+      'difficulty',
+      'cpc',
+      'brandVoice',
+      'tone',
+    ],
+    temperature: 0.7,
+    maxTokens: 500,
+    bestModel: 'gpt-4o-mini',
+    examples: [],
+  },
+
   // PRODUCT META DESCRIPTION
   product_meta_description: {
     id: 'product_meta_description',

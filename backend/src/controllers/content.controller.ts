@@ -27,6 +27,8 @@ import { ShopifyBlogService } from '../services/shopify-blog-service';
 import { getEncryptionService } from '../services/encryption-service';
 import { EncryptedData } from '../types/auth.types';
 import { DataForSEOService } from '../services/dataforseo-service';
+import { getAIContentService } from '../services/ai-content-service';
+import { ContentGenerationInput } from '../types/ai.types';
 import axios from 'axios';
 
 @Controller('content')
@@ -206,8 +208,25 @@ export class ContentController implements OnModuleInit {
           this.logger.warn(`DataForSEO enrichment skipped: ${error.message}`);
         }
 
-        // Generate variants synchronously for the product (enriched with keyword data)
-        const variants = this.generateProductVariants(product, aiModel, numberOfVariants, keywordData);
+        // Load business profile for brand voice
+        let businessProfile: any = null;
+        try {
+          businessProfile = await this.prisma.businessProfile.findUnique({
+            where: { organizationId },
+          });
+        } catch {
+          // Business profile optional
+        }
+
+        // Generate variants using real AI (OpenAI/Claude via AIContentService)
+        const variants = await this.generateProductVariants(
+          product,
+          aiModel,
+          numberOfVariants,
+          keywordData,
+          businessProfile,
+          organizationId,
+        );
 
         const generationId = uuidv4();
         contentGenerations.push({
@@ -434,9 +453,43 @@ export class ContentController implements OnModuleInit {
    * Update product SEO meta on Shopify
    */
   private async publishProductSEOToShopify(product: any, variantId: string, organizationId: string) {
-    // Find the variant data (from the generated variants)
-    const variants = this.generateProductVariants(product, 'gpt-4o-mini', 4);
-    const selectedVariant = variants.find((v: any) => v.id === variantId) || variants[0];
+    // Look up the previously-generated ContentGeneration record rather than
+    // regenerating content — the user already approved a specific variant.
+    const generations = await this.prisma.contentGeneration.findMany({
+      where: { productId: product.id, organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+
+    let selectedVariant: any = null;
+    for (const gen of generations) {
+      try {
+        const content = JSON.parse(gen.generatedContent);
+        if (content.metaTitle && content.metaDescription) {
+          selectedVariant = {
+            id: gen.id,
+            metaTitle: content.metaTitle,
+            metaDescription: content.metaDescription,
+          };
+          if (gen.id === variantId) break; // exact match
+        }
+      } catch {
+        // Skip malformed
+      }
+    }
+
+    if (!selectedVariant) {
+      // No prior generation — generate fresh
+      const variants = await this.generateProductVariants(
+        product,
+        'gpt-4o-mini',
+        3,
+        undefined,
+        undefined,
+        organizationId,
+      );
+      selectedVariant = variants.find((v: any) => v.id === variantId) || variants[0];
+    }
 
     if (!selectedVariant) {
       throw new HttpException('No variant found to publish', HttpStatus.BAD_REQUEST);
@@ -570,143 +623,225 @@ export class ContentController implements OnModuleInit {
   // ===========================================================================
 
   /**
-   * Find product by ID - checks DB first, falls back to mock data
+   * Find product by ID from the database. Returns null if not found —
+   * the caller should prompt the user to sync products from Shopify.
    */
   private async findProduct(productId: string): Promise<any | null> {
-    // Try Prisma DB
-    try {
-      const dbProduct = await this.prisma.product.findFirst({
-        where: {
-          OR: [
-            { id: productId },
-            { shopifyProductId: productId },
-          ],
-        },
-      });
-      if (dbProduct) {
-        return {
-          id: dbProduct.id,
-          title: dbProduct.title,
-          description: dbProduct.bodyHtml || '',
-          vendor: dbProduct.vendor || '',
-          productType: dbProduct.productType || '',
-        };
-      }
-    } catch {
-      // DB might not have the product
-    }
+    const dbProduct = await this.prisma.product.findFirst({
+      where: {
+        OR: [{ id: productId }, { shopifyProductId: productId }],
+      },
+    });
 
-    // Check mock products from products controller
-    const mockProducts = this.getMockProducts();
-    return mockProducts.find(
-      (p) => p.id === productId || p.shopifyId === productId
-    ) || null;
-  }
+    if (!dbProduct) return null;
 
-  /**
-   * Mock product catalog (mirrors products.controller.ts)
-   */
-  private getMockProducts(): any[] {
-    return [
-      { id: 'mock-prod-001', shopifyId: 'gid://shopify/Product/7891234567890', title: 'Premium Running Shoes - CloudStep Pro', description: 'Experience ultimate comfort with our CloudStep Pro running shoes.', vendor: 'CloudStep Athletics', productType: 'Footwear' },
-      { id: 'mock-prod-002', shopifyId: 'gid://shopify/Product/7891234567891', title: 'Organic Cotton T-Shirt - Essential Fit', description: 'Made from 100% GOTS-certified organic cotton.', vendor: 'EcoWear Basics', productType: 'Apparel' },
-      { id: 'mock-prod-003', shopifyId: 'gid://shopify/Product/7891234567892', title: 'Merino Wool Sweater - Alpine Collection', description: 'Luxurious 100% Australian merino wool sweater.', vendor: 'Alpine Outfitters', productType: 'Apparel' },
-      { id: 'mock-prod-004', shopifyId: 'gid://shopify/Product/7891234567893', title: 'Leather Crossbody Bag - Metropolitan', description: 'Handcrafted from full-grain Italian leather.', vendor: 'Artisan Leather Co.', productType: 'Accessories' },
-      { id: 'mock-prod-005', shopifyId: 'gid://shopify/Product/7891234567894', title: 'Bamboo Yoga Mat - ZenFlow Series', description: 'Eco-friendly yoga mat made from natural bamboo fiber.', vendor: 'ZenFlow Wellness', productType: 'Fitness Equipment' },
-      { id: 'mock-prod-006', shopifyId: 'gid://shopify/Product/7891234567895', title: 'Stainless Steel Water Bottle - HydroElite 32oz', description: 'Triple-wall vacuum insulated stainless steel water bottle.', vendor: 'HydroElite', productType: 'Drinkware' },
-      { id: 'mock-prod-007', shopifyId: 'gid://shopify/Product/7891234567896', title: 'Wireless Noise Cancelling Headphones - SoundWave Pro', description: 'Premium wireless headphones with active noise cancellation.', vendor: 'SoundWave Audio', productType: 'Electronics' },
-      { id: 'mock-prod-008', shopifyId: 'gid://shopify/Product/7891234567897', title: 'Scented Soy Candle - Wanderlust Collection', description: 'Hand-poured 100% soy wax candle with cotton wick.', vendor: 'Lumiere Home', productType: 'Home & Garden' },
-      { id: 'mock-prod-009', shopifyId: 'gid://shopify/Product/7891234567898', title: 'Linen Bed Sheet Set - Riviera Collection', description: 'Stonewashed French linen bed sheet set.', vendor: 'Riviera Home', productType: 'Bedding' },
-      { id: 'mock-prod-010', shopifyId: 'gid://shopify/Product/7891234567899', title: 'Ceramic Pour Over Coffee Maker - Artisan Brew', description: 'Handmade ceramic pour over coffee maker.', vendor: 'Artisan Brew Co.', productType: 'Kitchen' },
-    ];
+    return {
+      id: dbProduct.id,
+      title: dbProduct.title,
+      description: dbProduct.bodyHtml || '',
+      vendor: dbProduct.vendor || '',
+      productType: dbProduct.productType || '',
+      tags: dbProduct.tags || [],
+      primaryKeyword: dbProduct.primaryKeyword || null,
+      organizationId: dbProduct.organizationId,
+    };
   }
 
   // ===========================================================================
-  // VARIANT GENERATION (synchronous, template-based)
+  // VARIANT GENERATION (async, real AI via AIContentService)
   // ===========================================================================
 
   /**
-   * Generate SEO content variants for a product
-   * Uses smart templates enriched with DataForSEO keyword data when available
+   * Generate SEO content variants for a product using real AI.
+   *
+   * Calls OpenAI/Claude via AIContentService with the `product_meta_pair` prompt
+   * which returns structured JSON per variant. Enriches with DataForSEO keyword
+   * data (search volume, difficulty, CPC) and the organization's brand voice.
+   *
+   * Falls back to returning a single variant with an error reasoning when the
+   * AI call fails — the UI can then surface the actual error to the user.
    */
-  private generateProductVariants(
+  private async generateProductVariants(
     product: any,
     aiModel: string,
     count: number,
     keywordData?: any,
-  ): any[] {
-    const variants: any[] = [];
-    const { title, description, vendor, productType } = product;
+    businessProfile?: any,
+    organizationId?: string,
+  ): Promise<any[]> {
+    const { title, description, vendor, productType, tags } = product;
+    const cleanDesc = (description || '').replace(/<[^>]*>/g, '').trim().slice(0, 500);
 
-    // Clean description (strip HTML)
-    const cleanDesc = (description || '').replace(/<[^>]*>/g, '').trim();
-    const shortDesc = cleanDesc.substring(0, 120);
+    // Build target keyword from product info + keyword research
+    const targetKeyword =
+      keywordData?.keyword ||
+      product.primaryKeyword ||
+      (productType ? `${productType} ${title.split(' - ')[0]}`.trim() : title);
 
-    // Boost scores if we have keyword data (real SEO intelligence)
-    const hasKeywordData = !!keywordData;
-    const searchVolume = keywordData?.search_volume || 0;
-    const difficulty = keywordData?.keyword_difficulty || 50;
+    // Brand voice summary for the prompt
+    const brandVoiceSummary = businessProfile?.brandVoice
+      ? [
+          businessProfile.brandVoice.tone && `Tone: ${businessProfile.brandVoice.tone}`,
+          businessProfile.brandVoice.personality &&
+            `Personality: ${Array.isArray(businessProfile.brandVoice.personality) ? businessProfile.brandVoice.personality.join(', ') : businessProfile.brandVoice.personality}`,
+          businessProfile.brandVoice.avoidWords?.length &&
+            `Avoid: ${businessProfile.brandVoice.avoidWords.join(', ')}`,
+        ]
+          .filter(Boolean)
+          .join('. ')
+      : 'Professional and customer-focused.';
 
-    // Adjust strategy based on keyword difficulty
-    const difficultyNote = hasKeywordData
-      ? difficulty > 70
-        ? ` Keyword difficulty: ${difficulty}/100 (high competition - long-tail recommended).`
-        : difficulty > 40
-          ? ` Keyword difficulty: ${difficulty}/100 (moderate - good opportunity).`
-          : ` Keyword difficulty: ${difficulty}/100 (low competition - excellent opportunity).`
-      : '';
+    // AIContentService input
+    const input: ContentGenerationInput = {
+      productTitle: title,
+      productDescription: cleanDesc,
+      productType: productType || 'product',
+      keywords: [targetKeyword, ...(tags || [])].filter(Boolean),
+      brandVoice: brandVoiceSummary,
+      tone: this.mapBrandTone(businessProfile?.brandVoice?.tone),
+      additionalContext: [
+        `Vendor: ${vendor || 'Unknown'}`,
+        keywordData?.search_volume !== undefined &&
+          `Target keyword search volume: ${keywordData.search_volume}/month`,
+        keywordData?.keyword_difficulty !== undefined &&
+          `Target keyword difficulty: ${keywordData.keyword_difficulty}/100`,
+      ]
+        .filter(Boolean)
+        .join('. '),
+    };
 
-    const volumeNote = hasKeywordData && searchVolume > 0
-      ? ` Monthly search volume: ${searchVolume.toLocaleString()}.`
-      : '';
+    const aiService = getAIContentService();
+    const orgId = organizationId || 'unknown';
 
-    // Template strategies for variant diversity
-    const strategies = [
-      {
-        // Strategy 1: Benefit-focused
-        metaTitle: `${title} | Premium ${productType} by ${vendor}`,
-        metaDescription: `${shortDesc}. Shop ${title} from ${vendor} - free shipping on qualifying orders.`,
-        score: hasKeywordData ? Math.min(95, 88 + (searchVolume > 1000 ? 5 : 0)) : 88,
-        reasoning: `Strong brand mention, benefit-focused, includes shipping incentive. Good keyword density and natural reading flow.${difficultyNote}${volumeNote}`,
-      },
-      {
-        // Strategy 2: Problem-solution
-        metaTitle: `Buy ${title} - Best ${productType} ${new Date().getFullYear()}`,
-        metaDescription: `Looking for the best ${productType.toLowerCase()}? ${title} by ${vendor} delivers exceptional quality. ${shortDesc.substring(0, 80)}...`,
-        score: hasKeywordData ? Math.min(95, 82 + (difficulty < 50 ? 8 : 0)) : 82,
-        reasoning: `Good search intent match with "best" keyword. Question-based meta description engages users.${difficultyNote}${volumeNote}`,
-      },
-      {
-        // Strategy 3: Value proposition
-        metaTitle: `${title} - ${vendor} | Shop ${productType}`,
-        metaDescription: `Discover ${title}. ${cleanDesc.substring(0, 100)}. Trusted by thousands of happy customers. Order yours today.`,
-        score: hasKeywordData ? Math.min(95, 76 + (searchVolume > 500 ? 5 : 0)) : 76,
-        reasoning: `Clean and professional. Social proof element with "trusted by thousands". Meta title could be more descriptive.${difficultyNote}${volumeNote}`,
-      },
-      {
-        // Strategy 4: Feature-rich
-        metaTitle: `${title} | Top-Rated ${productType} - ${vendor}`,
-        metaDescription: `${cleanDesc.substring(0, 130)}. Rated 4.8/5 by our customers. Free returns within 30 days.`,
-        score: hasKeywordData ? Math.min(95, 85 + (searchVolume > 1000 ? 3 : 0)) : 85,
-        reasoning: `Excellent use of ratings for CTR boost. Return policy reduces purchase friction. Strong keyword placement.${difficultyNote}${volumeNote}`,
-      },
-    ];
-
-    for (let i = 0; i < Math.min(count, strategies.length); i++) {
-      const strategy = strategies[i];
-      variants.push({
-        id: `${product.id}-variant-${i + 1}`,
-        metaTitle: strategy.metaTitle,
-        metaDescription: strategy.metaDescription,
-        qualityScore: strategy.score,
-        reasoning: strategy.reasoning,
-      });
+    let scoredVariants: any[];
+    try {
+      scoredVariants = await aiService.generateContent('product_meta', input, orgId, count);
+    } catch (error: any) {
+      this.logger.error(
+        `AIContentService.generateContent failed for product ${product.id}: ${error.message}`,
+      );
+      // Surface the failure to the UI — do not fall back to templates.
+      return [
+        {
+          id: `${product.id}-error-1`,
+          metaTitle: '',
+          metaDescription: '',
+          qualityScore: 0,
+          reasoning: `AI generation failed: ${error.message}. Check API keys (OPENAI_API_KEY, ANTHROPIC_API_KEY) and try again.`,
+          error: true,
+        },
+      ];
     }
 
-    // Sort by score descending
+    // Each variant's `content` field holds the raw AI response. Our
+    // `product_meta_pair` prompt asks for JSON with metaTitle, metaDescription,
+    // angle, reasoning. Parse defensively.
+    const variants = scoredVariants.map((variant, i) => {
+      const parsed = this.parseMetaPairJSON(variant.content);
+      return {
+        id: `${product.id}-variant-${i + 1}`,
+        metaTitle: parsed.metaTitle || '',
+        metaDescription: parsed.metaDescription || '',
+        qualityScore: variant.qualityScore?.overall ?? 0,
+        reasoning: parsed.reasoning
+          ? `${parsed.angle ? `[${parsed.angle}] ` : ''}${parsed.reasoning}`
+          : 'Generated by AI.',
+        model: variant.model,
+        cost: variant.metadata?.cost,
+        tokensUsed: variant.metadata?.totalTokens,
+      };
+    });
+
+    // Best variant first
     variants.sort((a, b) => b.qualityScore - a.qualityScore);
 
+    // Persist each variant as a ContentGeneration record for audit + cost tracking
+    if (organizationId) {
+      for (const variant of variants) {
+        try {
+          await this.prisma.contentGeneration.create({
+            data: {
+              organizationId,
+              productId: product.id?.startsWith('mock-') ? null : product.id,
+              targetType: 'META_TITLE',
+              aiModel: variant.model || aiModel,
+              prompt: input.productTitle || '',
+              generatedContent: JSON.stringify({
+                metaTitle: variant.metaTitle,
+                metaDescription: variant.metaDescription,
+              }),
+              qualityScore: Math.round(variant.qualityScore || 0),
+              status:
+                (variant.qualityScore || 0) >= 85
+                  ? 'APPROVED'
+                  : (variant.qualityScore || 0) >= 70
+                    ? 'PENDING'
+                    : 'REJECTED',
+              tokensUsed: variant.tokensUsed || null,
+              cost: variant.cost ? variant.cost.toString() : null,
+            },
+          });
+        } catch (error: any) {
+          // Non-fatal — logging only
+          this.logger.warn(`Failed to persist ContentGeneration: ${error.message}`);
+        }
+      }
+    }
+
     return variants;
+  }
+
+  /**
+   * Parse the JSON payload the AI returns from the product_meta_pair prompt.
+   * The AI sometimes wraps JSON in ```json fences; strip them defensively.
+   */
+  private parseMetaPairJSON(raw: string): {
+    metaTitle?: string;
+    metaDescription?: string;
+    angle?: string;
+    reasoning?: string;
+  } {
+    if (!raw) return {};
+    // Strip common fence patterns
+    let cleaned = raw.trim();
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
+    // Find the first { and last } and parse that slice
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) return {};
+    try {
+      const obj = JSON.parse(cleaned.slice(start, end + 1));
+      return {
+        metaTitle: obj.metaTitle,
+        metaDescription: obj.metaDescription,
+        angle: obj.angle,
+        reasoning: obj.reasoning,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Map business profile tone (from Onboarding) to AIContentService tone enum.
+   */
+  private mapBrandTone(
+    tone?: string,
+  ): 'professional' | 'casual' | 'enthusiastic' | 'authoritative' | 'friendly' | undefined {
+    if (!tone) return undefined;
+    switch (tone) {
+      case 'professional':
+      case 'casual':
+      case 'authoritative':
+      case 'friendly':
+        return tone as any;
+      case 'technical':
+        return 'professional';
+      case 'conversational':
+        return 'casual';
+      default:
+        return undefined;
+    }
   }
 
   /**

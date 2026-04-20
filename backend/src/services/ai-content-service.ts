@@ -746,18 +746,18 @@ export class AIContentService {
 
   private getTemplateId(contentType: ContentType): string {
     const mapping: Record<ContentType, string> = {
-      product_meta: 'product_meta_title',
+      product_meta: 'product_meta_pair',
       product_description: 'product_description_long',
       blog_post: 'blog_post',
       research: 'research_query',
       schema: 'schema_product',
     };
-    return mapping[contentType] || 'product_meta_title';
+    return mapping[contentType] || 'product_meta_pair';
   }
 
   private getMaxTokens(contentType: ContentType): number {
     const tokenLimits: Record<ContentType, number> = {
-      product_meta: 300,
+      product_meta: 500,
       product_description: 1500,
       blog_post: 4000,
       research: 3000,
@@ -1082,6 +1082,19 @@ Generate the content in HTML format with proper heading tags.`;
       breakdown,
     };
   }
+}
+
+// ============================================================================
+// SINGLETON
+// ============================================================================
+
+let aiContentServiceInstance: AIContentService | null = null;
+
+export function getAIContentService(): AIContentService {
+  if (!aiContentServiceInstance) {
+    aiContentServiceInstance = new AIContentService();
+  }
+  return aiContentServiceInstance;
 }
 
 // ============================================================================
