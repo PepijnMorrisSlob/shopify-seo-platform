@@ -27,6 +27,10 @@ import { CompetitorTracking } from './pages/CompetitorTracking';
 import { KnowledgeBase } from './pages/KnowledgeBase';
 import { SEOAudit } from './pages/SEOAudit';
 
+// Pages - Agency Console
+import { AgencyDashboard } from './pages/AgencyDashboard';
+import { AgencyReviewQueue } from './pages/AgencyReviewQueue';
+
 // Create React Query client
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +66,7 @@ function AppContent() {
     if (path === '/analytics') return 'analytics';
     if (path === '/settings') return 'settings';
     if (path === '/onboarding') return 'onboarding';
+    if (path.startsWith('/agency')) return 'agency';
     return '';
   };
 
@@ -111,6 +116,10 @@ function AppContent() {
 
         {/* SEO Audit & Content Health */}
         <Route path="/seo-audit" element={<SEOAudit />} />
+
+        {/* Agency Console */}
+        <Route path="/agency" element={<AgencyDashboard />} />
+        <Route path="/agency/review-queue" element={<AgencyReviewQueue />} />
 
         {/* Settings */}
         <Route path="/settings" element={<Settings />} />
