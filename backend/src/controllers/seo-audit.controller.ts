@@ -203,12 +203,22 @@ export class SEOAuditController {
         };
       }
 
-      // No real data - return comprehensive mock overview
-      console.log('[SEOAuditController] No QA pages found, returning mock overview');
-      return this.getMockOverview();
+      // No pages yet — return empty state
+      return {
+        healthScore: 0,
+        lastScanAt: new Date().toISOString(),
+        totalPages: 0,
+        issues: { critical: 0, warnings: 0, opportunities: 0, passed: 0 },
+        categories: {
+          technicalSEO: { score: 0, issues: 0 },
+          onPageSEO: { score: 0, issues: 0 },
+          contentQuality: { score: 0, issues: 0 },
+          performance: { score: 0, issues: 0 },
+        },
+      };
     } catch (error) {
       console.error('[SEOAuditController] Error in overview:', error);
-      return this.getMockOverview();
+      throw error;
     }
   }
 
@@ -351,12 +361,11 @@ export class SEOAuditController {
         return filteredIssues;
       }
 
-      // Return mock issues
-      console.log('[SEOAuditController] No pages found, returning mock issues');
-      return this.getMockIssues(severity, category);
+      // No pages yet — return empty array
+      return [];
     } catch (error) {
       console.error('[SEOAuditController] Error in issues:', error);
-      return this.getMockIssues(severity, category);
+      throw error;
     }
   }
 
@@ -511,27 +520,23 @@ export class SEOAuditController {
   ) {
     const resolvedOrgId = await this.resolveOrganizationId(organizationId);
 
-    try {
-      // In production, this would queue a background job.
-      // For now, simulate a scan initiation.
-      const scanId = `scan-${Date.now()}`;
+    // The audit endpoints already compute live results on-demand against the
+    // database, so "run" is effectively a no-op cache bust. Return an
+    // immediate completion status — no background job needed.
+    const scanId = `scan-${Date.now()}`;
+    console.log(
+      `[SEOAuditController] Audit refresh for org ${resolvedOrgId}: ${scanId}`,
+    );
 
-      console.log(`[SEOAuditController] Audit scan initiated: ${scanId} for org ${resolvedOrgId}`);
-
-      return {
-        scanId,
-        status: 'in-progress',
-        startedAt: new Date().toISOString(),
-        estimatedDuration: 45,
-        message: 'SEO audit scan has been initiated. Results will be available shortly.',
-      };
-    } catch (error) {
-      console.error('[SEOAuditController] Error running audit:', error);
-      throw new HttpException(
-        'Failed to initiate audit scan',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return {
+      scanId,
+      status: 'completed',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      organizationId: resolvedOrgId,
+      message:
+        'SEO audit runs live on every request against the current database. Refresh the overview/issues pages to see the latest state.',
+    };
   }
 
   // =================================================================
@@ -596,12 +601,11 @@ export class SEOAuditController {
         }
       }
 
-      // Return mock pruning candidates
-      console.log('[SEOAuditController] Returning mock pruning candidates');
-      return this.getMockPruningCandidates();
+      // No candidates — all content is performing well or no pages published
+      return [];
     } catch (error) {
       console.error('[SEOAuditController] Error in content-pruning:', error);
-      return this.getMockPruningCandidates();
+      throw error;
     }
   }
 
@@ -778,12 +782,11 @@ export class SEOAuditController {
         }
       }
 
-      // Return mock keyword conflicts
-      console.log('[SEOAuditController] Returning mock keyword conflicts');
-      return this.getMockKeywordConflicts();
+      // No conflicts detected
+      return [];
     } catch (error) {
       console.error('[SEOAuditController] Error in keyword-conflicts:', error);
-      return this.getMockKeywordConflicts();
+      throw error;
     }
   }
 
@@ -957,12 +960,11 @@ export class SEOAuditController {
         });
       }
 
-      // Return mock content health data
-      console.log('[SEOAuditController] Returning mock content health data');
-      return this.getMockContentHealth();
+      // No published pages yet
+      return [];
     } catch (error) {
       console.error('[SEOAuditController] Error in content-health:', error);
-      return this.getMockContentHealth();
+      throw error;
     }
   }
 
@@ -1123,63 +1125,38 @@ export class SEOAuditController {
   async getHistory(
     @Query('organizationId') organizationId?: string,
   ): Promise<AuditHistoryItem[]> {
-    // In production, this would query an audit_scans table.
-    // For now, return mock historical data.
-    return [
-      {
-        id: 'scan-1',
-        scanDate: '2026-02-06T08:00:00Z',
-        healthScore: 74,
-        issuesFound: 23,
-        issuesFixed: 0,
-        duration: 42,
-        status: 'completed',
+    const resolvedOrgId = await this.resolveOrganizationId(organizationId);
+
+    // Derive audit history from AnalyticsSnapshot rows (populated by the
+    // daily analytics cron). Each weekly snapshot rolls up avg SEO score,
+    // which is what "audit history" fundamentally tracks.
+    const snapshots = await this.prisma.analyticsSnapshot.findMany({
+      where: {
+        organizationId: resolvedOrgId,
+        snapshotType: 'WEEKLY',
       },
-      {
-        id: 'scan-2',
-        scanDate: '2026-01-30T08:00:00Z',
-        healthScore: 71,
-        issuesFound: 27,
-        issuesFixed: 4,
-        duration: 38,
-        status: 'completed',
-      },
-      {
-        id: 'scan-3',
-        scanDate: '2026-01-23T08:00:00Z',
-        healthScore: 68,
-        issuesFound: 31,
-        issuesFixed: 6,
-        duration: 45,
-        status: 'completed',
-      },
-      {
-        id: 'scan-4',
-        scanDate: '2026-01-16T08:00:00Z',
-        healthScore: 62,
-        issuesFound: 35,
-        issuesFixed: 3,
-        duration: 40,
-        status: 'completed',
-      },
-      {
-        id: 'scan-5',
-        scanDate: '2026-01-09T08:00:00Z',
-        healthScore: 58,
-        issuesFound: 38,
-        issuesFixed: 7,
-        duration: 52,
-        status: 'completed',
-      },
-      {
-        id: 'scan-6',
-        scanDate: '2026-01-02T08:00:00Z',
-        healthScore: 55,
-        issuesFound: 41,
-        issuesFixed: 2,
-        duration: 47,
-        status: 'completed',
-      },
-    ];
+      orderBy: { snapshotDate: 'desc' },
+      take: 12, // Last 12 weeks
+    });
+
+    if (snapshots.length === 0) {
+      return [];
+    }
+
+    return snapshots.map((snap, idx) => {
+      const prev = snapshots[idx + 1];
+      const scoreDelta = prev
+        ? Number(snap.avgSeoScore) - Number(prev.avgSeoScore)
+        : 0;
+      return {
+        id: snap.id,
+        scanDate: snap.snapshotDate.toISOString(),
+        healthScore: Math.round(Number(snap.avgSeoScore)),
+        issuesFound: Math.max(0, snap.totalProducts - snap.optimizedProducts),
+        issuesFixed: prev ? Math.max(0, Math.round(scoreDelta * 2)) : 0,
+        duration: 0, // Legacy field; audits run on-demand now
+        status: 'completed' as const,
+      };
+    });
   }
 }
