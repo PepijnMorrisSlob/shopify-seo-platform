@@ -200,6 +200,273 @@ function FieldGroup({
   );
 }
 
+// --- GSC Integration Component ---
+// Real Google Search Console OAuth connection flow.
+// Reads connection status from backend, initiates OAuth via popup, handles site selection.
+const GSC_API_BASE =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
+
+interface GSCStatus {
+  connected: boolean;
+  siteUrl?: string;
+  connectedAt?: string;
+}
+
+interface GSCSite {
+  siteUrl: string;
+  permissionLevel: string;
+}
+
+function GSCIntegration({
+  organizationId,
+  onNotify,
+}: {
+  organizationId: string | null;
+  onNotify: (type: 'success' | 'error', message: string) => void;
+}) {
+  const [status, setStatus] = useState<GSCStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState<GSCSite[]>([]);
+  const [showSitePicker, setShowSitePicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    if (!organizationId) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${GSC_API_BASE}/gsc/status?organizationId=${encodeURIComponent(organizationId)}`,
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data: GSCStatus = await res.json();
+      setStatus(data);
+    } catch (err: any) {
+      console.error('GSC status check failed:', err);
+      setStatus({ connected: false });
+    } finally {
+      setLoading(false);
+    }
+  }, [organizationId]);
+
+  useEffect(() => {
+    fetchStatus();
+    // Refresh status when the page gets focus (after OAuth popup closes)
+    const onFocus = () => fetchStatus();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [fetchStatus]);
+
+  // Handle OAuth callback redirect params (?gsc=connected or ?gsc=error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gsc = params.get('gsc');
+    if (gsc === 'connected') {
+      onNotify('success', 'Google Search Console connected successfully. Select a site to track.');
+      fetchStatus();
+      setShowSitePicker(true);
+      // Clean the URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (gsc === 'error') {
+      const reason = params.get('reason') || 'unknown';
+      onNotify('error', `Google Search Console connection failed: ${reason}`);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [onNotify, fetchStatus]);
+
+  const handleConnect = async () => {
+    if (!organizationId) {
+      onNotify('error', 'Complete business profile setup before connecting GSC.');
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${GSC_API_BASE}/gsc/auth-url?organizationId=${encodeURIComponent(organizationId)}`,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to start OAuth flow');
+      }
+      const { url } = await res.json();
+      // Navigate the current window — backend will redirect back with ?gsc=connected
+      window.location.href = url;
+    } catch (err: any) {
+      onNotify('error', err.message || 'Failed to initiate Google Search Console connection.');
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!organizationId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `${GSC_API_BASE}/gsc/disconnect?organizationId=${encodeURIComponent(organizationId)}`,
+        { method: 'POST' },
+      );
+      if (!res.ok) throw new Error(await res.text());
+      onNotify('success', 'Google Search Console disconnected.');
+      await fetchStatus();
+    } catch (err: any) {
+      onNotify('error', 'Failed to disconnect.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLoadSites = async () => {
+    if (!organizationId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `${GSC_API_BASE}/gsc/sites?organizationId=${encodeURIComponent(organizationId)}`,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to load sites');
+      }
+      const data = await res.json();
+      setSites(data.sites || []);
+      setShowSitePicker(true);
+    } catch (err: any) {
+      onNotify('error', err.message || 'Could not load your verified sites.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSelectSite = async (siteUrl: string) => {
+    if (!organizationId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${GSC_API_BASE}/gsc/select-site`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organizationId, siteUrl }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      onNotify('success', `Tracking ${siteUrl} — data will sync daily at 1 AM UTC.`);
+      setShowSitePicker(false);
+      await fetchStatus();
+    } catch (err: any) {
+      onNotify('error', 'Failed to save site selection.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <FieldGroup
+        label="Google Search Console"
+        helpText="Connect to view organic search performance data"
+      >
+        <Skeleton className="h-10 w-40" />
+      </FieldGroup>
+    );
+  }
+
+  if (!status?.connected) {
+    return (
+      <FieldGroup
+        label="Google Search Console"
+        helpText="Connect to view organic search performance data. Updates daily at 1 AM UTC."
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <Badge
+            variant="outline"
+            className="text-amber-600 border-amber-200 bg-amber-50"
+          >
+            Not Connected
+          </Badge>
+          <SecondaryButton onClick={handleConnect} icon={ExternalLink}>
+            Connect Google Search Console
+          </SecondaryButton>
+        </div>
+      </FieldGroup>
+    );
+  }
+
+  return (
+    <FieldGroup
+      label="Google Search Console"
+      helpText={
+        status.siteUrl
+          ? `Tracking ${status.siteUrl}. Data syncs daily at 1 AM UTC.`
+          : 'Connected but no site selected. Pick a site to start tracking.'
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Badge
+            variant="outline"
+            className="text-emerald-600 border-emerald-200 bg-emerald-50"
+          >
+            {status.siteUrl ? 'Connected' : 'Connected — pick a site'}
+          </Badge>
+          {status.siteUrl && (
+            <span className="text-sm text-zinc-600 font-mono">
+              {status.siteUrl}
+            </span>
+          )}
+          <SecondaryButton
+            onClick={handleLoadSites}
+            disabled={saving}
+            icon={saving ? Loader2 : undefined}
+          >
+            {status.siteUrl ? 'Change site' : 'Pick a site'}
+          </SecondaryButton>
+          <GhostButton onClick={handleDisconnect} disabled={saving}>
+            Disconnect
+          </GhostButton>
+        </div>
+
+        {showSitePicker && (
+          <div className="border border-zinc-200 rounded-lg p-3 bg-zinc-50 space-y-2">
+            <p className="text-sm font-medium text-zinc-700">
+              Verified sites in your GSC account:
+            </p>
+            {sites.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                No verified sites found. Verify your Shopify store domain at{' '}
+                <a
+                  href="https://search.google.com/search-console"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 underline"
+                >
+                  search.google.com/search-console
+                </a>
+                .
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {sites.map((site) => (
+                  <li
+                    key={site.siteUrl}
+                    className="flex items-center justify-between p-2 bg-white rounded border border-zinc-200"
+                  >
+                    <span className="text-sm font-mono text-zinc-700">
+                      {site.siteUrl}
+                    </span>
+                    <button
+                      onClick={() => handleSelectSite(site.siteUrl)}
+                      disabled={saving || status.siteUrl === site.siteUrl}
+                      className="px-3 py-1 text-xs rounded bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-50"
+                    >
+                      {status.siteUrl === site.siteUrl ? 'Current' : 'Select'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </div>
+    </FieldGroup>
+  );
+}
+
 // --- AI Model Options ---
 const AI_MODEL_OPTIONS: { value: AIModel; label: string }[] = [
   { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
@@ -641,30 +908,24 @@ export function Settings() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              <GSCIntegration
+                organizationId={profile?.organizationId || null}
+                onNotify={(type, message) => setNotification({ type, message })}
+              />
               <FieldGroup
-                label="Google Search Console"
-                helpText="Connect to view organic search performance data"
+                label="DataForSEO"
+                helpText="Keyword research, SERP analysis, and competitor intelligence"
               >
                 <div className="flex items-center gap-3">
                   <Badge
                     variant="outline"
-                    className="text-amber-600 border-amber-200 bg-amber-50"
+                    className="text-emerald-600 border-emerald-200 bg-emerald-50"
                   >
-                    Not Connected
+                    Connected
                   </Badge>
-                  <SecondaryButton
-                    onClick={() => {
-                      // In production, this would initiate OAuth flow
-                      setNotification({
-                        type: 'error',
-                        message:
-                          'Google Search Console integration requires OAuth setup. Configure in your Google Cloud Console.',
-                      });
-                    }}
-                    icon={ExternalLink}
-                  >
-                    Connect
-                  </SecondaryButton>
+                  <span className="text-sm text-zinc-500">
+                    Managed by platform — no action required
+                  </span>
                 </div>
               </FieldGroup>
             </CardContent>
